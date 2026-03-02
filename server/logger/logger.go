@@ -2,14 +2,15 @@
 package logger
 
 import (
-"context"
-"fmt"
+	"context"
+	"fmt"
+	"time"
 
-"ask-rules-server/db"
-"ask-rules-server/models"
+	"ask-rules-server/db"
+	"ask-rules-server/models"
 )
 
-func log(ctx context.Context, level, eventType, message string, details map[string]interface{}) {
+func log(_ context.Context, level, eventType, message string, details map[string]interface{}) {
 	if details == nil {
 		details = map[string]interface{}{}
 	}
@@ -19,7 +20,11 @@ func log(ctx context.Context, level, eventType, message string, details map[stri
 		Message:   message,
 		Metadata:  details,
 	}
-	if err := db.InsertLog(ctx, entry); err != nil {
+	// Utiliser un contexte indépendant de la requête HTTP : l'insertion de log
+	// ne doit pas échouer parce que le client SSE a fermé la connexion.
+	dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := db.InsertLog(dbCtx, entry); err != nil {
 		fmt.Printf("[logger] erreur insertion log: %v\n", err)
 	}
 }
