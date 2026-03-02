@@ -73,9 +73,10 @@ FROM debian:bookworm-slim AS runtime
 ARG ONNX_VERSION
 WORKDIR /app
 
-# Certificats SSL (requêtes HTTPS vers LLM APIs)
+# Certificats SSL (requêtes HTTPS vers LLM APIs) + poppler-utils (pdftotext)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Bibliothèque onnxruntime partagée (runtime CGO)
@@ -105,7 +106,8 @@ RUN mkdir -p uploads
 #   REDIS_URL        — ex: redis://redis:6379
 ENV PORT=3001 \
     MODEL_PATH=/app/models/multilingual-e5-small \
-    UPLOADS_DIR=/app/uploads
+    UPLOADS_DIR=/app/uploads \
+    LD_LIBRARY_PATH=/usr/local/lib
 
 EXPOSE 3001
 

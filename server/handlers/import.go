@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
+	"ask-rules-server/config"
 	"ask-rules-server/db"
 	"ask-rules-server/logger"
 	"ask-rules-server/models"
@@ -241,6 +244,22 @@ func ReprocessGame(w http.ResponseWriter, r *http.Request) {
 		filePaths = []string{game.FilePath}
 	}
 
+	// Vérifier que les fichiers sont accessibles avant de lancer le pipeline
+	var missingFiles []string
+	for _, fp := range filePaths {
+		absPath := filepath.Join(config.C.UploadsDir, fp)
+		if _, err := os.Stat(absPath); os.IsNotExist(err) {
+			missingFiles = append(missingFiles, absPath)
+		}
+	}
+	if len(missingFiles) > 0 {
+		send("error", map[string]interface{}{
+			"error": fmt.Sprintf("Fichier(s) introuvable(s) dans %s : %v",
+				config.C.UploadsDir, missingFiles),
+		})
+		return
+	}
+
 	if err := db.DeleteSections(r.Context(), game.ID); err != nil {
 		send("error", map[string]interface{}{"error": "Erreur suppression sections"})
 		return
@@ -347,6 +366,25 @@ func ReprocessAll(w http.ResponseWriter, r *http.Request) {
 				"game":  game.Name,
 				"index": i + 1,
 				"error": "Aucun fichier associé",
+			})
+			errorCount++
+			continue
+		}
+
+		// Vérifier que les fichiers sont accessibles avant de lancer le pipeline
+		var missing []string
+		for _, fp := range filePaths {
+			absPath := filepath.Join(config.C.UploadsDir, fp)
+			if _, err := os.Stat(absPath); os.IsNotExist(err) {
+				missing = append(missing, absPath)
+			}
+		}
+		if len(missing) > 0 {
+			send("game_error", map[string]interface{}{
+				"game":  game.Name,
+				"index": i + 1,
+				"error": fmt.Sprintf("Fichier(s) introuvable(s) dans %s : %v",
+					config.C.UploadsDir, missing),
 			})
 			errorCount++
 			continue

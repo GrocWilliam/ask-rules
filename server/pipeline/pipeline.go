@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"strings"
 
+	"ask-rules-server/config"
 	"ask-rules-server/db"
 	"ask-rules-server/embedder"
 	"ask-rules-server/models"
@@ -28,6 +29,11 @@ func Run(ctx context.Context, opts ImportOptions) error {
 	emit := opts.OnEvent
 	if emit == nil {
 		emit = func(string, map[string]interface{}) {}
+	}
+
+	// Vérifier que l'embedder est prêt avant de démarrer
+	if err := embedder.Init(); err != nil {
+		return fmt.Errorf("embedder non prêt (chemin modèle : %s) : %w", config.C.ModelPath, err)
 	}
 
 	emit("start", map[string]interface{}{"game": opts.GameName, "files": len(opts.FilePaths)})

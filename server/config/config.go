@@ -3,6 +3,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 
 	"github.com/joho/godotenv"
@@ -59,6 +60,16 @@ func Load() error {
 		UploadsDir:    getEnv("UPLOADS_DIR", "../uploads"),
 		ModelPath:     getEnv("MODEL_PATH", "../models/multilingual-e5-small"),
 	}
+
+	// Résoudre les chemins relatifs en chemins absolus
+	// afin que la résolution ne dépende pas du CWD au moment du lancement.
+	if abs, err := filepath.Abs(C.UploadsDir); err == nil {
+		C.UploadsDir = abs
+	}
+	if abs, err := filepath.Abs(C.ModelPath); err == nil {
+		C.ModelPath = abs
+	}
+
 	return nil
 }
 

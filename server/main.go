@@ -35,12 +35,12 @@ func main() {
 	if err := db.Migrate(context.Background()); err != nil {
 		log.Fatalf("Échec migration: %v", err)
 	}
-	log.Println("✔ Schéma à jour")
+	log.Printf("✔ Schéma à jour")
+	log.Printf("📂 Uploads : %s", config.C.UploadsDir)
 	if err := embedder.Init(); err != nil {
-		log.Printf("Avertissement: modèle d'embedding non initialisé: %v", err)
-	} else {
-		log.Printf("✔ Modèle d'embedding chargé depuis %s", config.C.ModelPath)
+		log.Fatalf("❌ Impossible de charger le modèle d'embedding depuis %s : %v", config.C.ModelPath, err)
 	}
+	log.Printf("✔ Modèle d'embedding chargé depuis %s", config.C.ModelPath)
 	cache.Init()
 	if config.C.RedisEnabled {
 		log.Println("✔ Redis activé")
