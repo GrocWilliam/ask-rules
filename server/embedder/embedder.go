@@ -2,15 +2,17 @@
 //
 // Utilise Xenova/multilingual-e5-small en format ONNX.
 // Le modèle doit être téléchargé dans le répertoire models/ :
-//   scripts/download-model.sh
+//
+//	scripts/download-model.sh
 //
 // Format attendu :
-//   models/multilingual-e5-small/
-//     model.onnx          (ou model_quantized.onnx)
-//     tokenizer.json
-//     tokenizer_config.json
-//     special_tokens_map.json
-//     vocab.txt (ou sentencepiece.bpe.model)
+//
+//	models/multilingual-e5-small/
+//	  model.onnx          (ou model_quantized.onnx)
+//	  tokenizer.json
+//	  tokenizer_config.json
+//	  special_tokens_map.json
+//	  vocab.txt (ou sentencepiece.bpe.model)
 package embedder
 
 import (
@@ -40,12 +42,12 @@ var (
 	once  sync.Once
 	ortMu sync.Mutex
 
-	vocab     map[string]int32
-	unkID     int32 = 0
-	clsID     int32 = 101
-	sepID     int32 = 102
-	_         int32 = 0 // padID — unused but kept for reference
-	session   *ort.AdvancedSession
+	vocab   map[string]int32
+	unkID   int32 = 0
+	clsID   int32 = 101
+	sepID   int32 = 102
+	_       int32 = 0 // padID — unused but kept for reference
+	session *ort.AdvancedSession
 
 	// Tensors pré-alloués (réutilisés à chaque inférence)
 	inIDs     *ort.Tensor[int32]
@@ -54,38 +56,61 @@ var (
 	outTensor *ort.Tensor[float32]
 
 	initialized bool
+	persistErr  error // erreur d'init conservée pour les appels suivants
 )
 
 // Init charge le modèle ONNX et le vocabulaire.
 func Init() error {
-	var initErr error
 	once.Do(func() {
 		modelDir := config.C.ModelPath
 
-		// Chargement du vocabulaire
-		vocab, initErr = loadVocab(filepath.Join(modelDir, "vocab.txt"))
-		if initErr != nil {
-			initErr = fmt.Errorf("chargement vocab : %w", initErr)
+		// Chargement du vocabulaire : tokenizer.json (HuggingFace BPE/SPM) en priorité
+		vocabCandidates := []string{
+			filepath.Join(modelDir, "tokenizer.json"),
+			filepath.Join(modelDir, "vocab.txt"),
+		}
+		var vocabErr error
+		for _, candidate := range vocabCandidates {
+			vocab, vocabErr = loadVocab(candidate)
+			if vocabErr == nil && len(vocab) > 0 {
+				break
+			}
+		}
+		if vocabErr != nil || len(vocab) == 0 {
+			persistErr = fmt.Errorf("chargement vocab (tokenizer.json / vocab.txt) : %w", vocabErr)
 			return
 		}
 
 		// Initialisation ONNX Runtime
 		ort.SetSharedLibraryPath(findOrtLib())
 		if err := ort.InitializeEnvironment(); err != nil {
-			initErr = fmt.Errorf("init ORT : %w", err)
+			persistErr = fmt.Errorf("init ORT : %w", err)
 			return
 		}
 
-		// Cherche le fichier modèle (quantized en priorité)
-		modelPath := filepath.Join(modelDir, "model_quantized.onnx")
-		if _, err := os.Stat(modelPath); err != nil {
-			modelPath = filepath.Join(modelDir, "model.onnx")
+		// Cherche le fichier modèle (quantized en priorité, puis onnx/ sous-répertoire)
+		modelCandidates := []string{
+			filepath.Join(modelDir, "model_quantized.onnx"),
+			filepath.Join(modelDir, "onnx", "model_quantized.onnx"),
+			filepath.Join(modelDir, "model.onnx"),
+			filepath.Join(modelDir, "onnx", "model.onnx"),
+		}
+		modelPath := ""
+		for _, c := range modelCandidates {
+			if _, err := os.Stat(c); err == nil {
+				modelPath = c
+				break
+			}
+		}
+		if modelPath == "" {
+			persistErr = fmt.Errorf("fichier modèle ONNX introuvable dans %s", modelDir)
+			return
 		}
 
 		// Création de la session ONNX
 		options, err := ort.NewSessionOptions()
 		if err != nil {
-			initErr = fmt.Errorf("options ORT : %w", err)
+			persistErr = fmt.Errorf("options ORT : %w", err)
 			return
 		}
 		defer options.Destroy()
@@ -96,22 +121,22 @@ func Init() error {
 		// Tensors pré-alloués — réutilisés à chaque Run()
 		inIDs, err = ort.NewEmptyTensor[int32](ort.NewShape(1, MaxTokens))
 		if err != nil {
-			initErr = fmt.Errorf("tensor input_ids : %w", err)
+			persistErr = fmt.Errorf("tensor input_ids : %w", err)
 			return
 		}
 		inMask, err = ort.NewEmptyTensor[int32](ort.NewShape(1, MaxTokens))
 		if err != nil {
-			initErr = fmt.Errorf("tensor attention_mask : %w", err)
+			persistErr = fmt.Errorf("tensor attention_mask : %w", err)
 			return
 		}
 		inTypes, err = ort.NewEmptyTensor[int32](ort.NewShape(1, MaxTokens))
 		if err != nil {
-			initErr = fmt.Errorf("tensor token_type_ids : %w", err)
+			persistErr = fmt.Errorf("tensor token_type_ids : %w", err)
 			return
 		}
 		outTensor, err = ort.NewEmptyTensor[float32](ort.NewShape(1, MaxTokens, Dims))
 		if err != nil {
-			initErr = fmt.Errorf("tensor output : %w", err)
+			persistErr = fmt.Errorf("tensor output : %w", err)
 			return
 		}
 
@@ -121,13 +146,13 @@ func Init() error {
 			[]ort.Value{outTensor},
 			options)
 		if err != nil {
-			initErr = fmt.Errorf("création session ORT : %w", err)
+			persistErr = fmt.Errorf("création session ORT : %w", err)
 			return
 		}
 
 		initialized = true
 	})
-	return initErr
+	return persistErr
 }
 
 // Embed génère un vecteur de dimension 384 pour le texte donné.
@@ -135,6 +160,10 @@ func Embed(_ context.Context, text string) ([]float32, error) {
 	if !initialized {
 		if err := Init(); err != nil {
 			return nil, err
+		}
+		// Après once.Do, vérifier que les tensors sont bien alloués
+		if inIDs == nil || inMask == nil || inTypes == nil || outTensor == nil {
+			return nil, fmt.Errorf("embedder non initialisé : %v", persistErr)
 		}
 	}
 
