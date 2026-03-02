@@ -1,6 +1,6 @@
 // embedder/embedder.go — Génération d'embeddings via ONNX Runtime
 //
-// Utilise Xenova/multilingual-e5-small en format ONNX.
+// Utilise intfloat/multilingual-e5-small en format ONNX (XLM-RoBERTa, Unigram SentencePiece).
 // Le modèle doit être téléchargé dans le répertoire models/ :
 //
 //	scripts/download-model.sh
@@ -8,17 +8,12 @@
 // Format attendu :
 //
 //	models/multilingual-e5-small/
-//	  model.onnx          (ou model_quantized.onnx)
-//	  tokenizer.json
-//	  tokenizer_config.json
-//	  special_tokens_map.json
-//	  vocab.txt (ou sentencepiece.bpe.model)
+//	  tokenizer.json          (vocab Unigram + special tokens)
+//	  onnx/model.onnx
 package embedder
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -26,7 +21,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"unicode"
 
 	"ask-rules-server/config"
 
@@ -42,11 +36,14 @@ var (
 	once  sync.Once
 	ortMu sync.Mutex
 
-	vocab   map[string]int32
-	unkID   int32 = 0
-	clsID   int32 = 101
-	sepID   int32 = 102
-	_       int32 = 0 // padID — unused but kept for reference
+	// vocab : token → ID (position dans le tableau Unigram)
+	vocab       map[string]int32
+	// vocabScores : token → log-probabilité (pour Viterbi Unigram)
+	vocabScores map[string]float64
+	unkID int32 = 3 // <unk> dans multilingual-e5-small
+	clsID int32 = 0 // <s>
+	sepID int32 = 2 // </s>
+
 	session *ort.AdvancedSession
 
 	// Tensors pré-alloués (réutilisés à chaque inférence)
@@ -64,20 +61,12 @@ func Init() error {
 	once.Do(func() {
 		modelDir := config.C.ModelPath
 
-		// Chargement du vocabulaire : tokenizer.json (HuggingFace BPE/SPM) en priorité
-		vocabCandidates := []string{
-			filepath.Join(modelDir, "tokenizer.json"),
-			filepath.Join(modelDir, "vocab.txt"),
-		}
-		var vocabErr error
-		for _, candidate := range vocabCandidates {
-			vocab, vocabErr = loadVocab(candidate)
-			if vocabErr == nil && len(vocab) > 0 {
-				break
-			}
-		}
-		if vocabErr != nil || len(vocab) == 0 {
-			persistErr = fmt.Errorf("chargement vocab (tokenizer.json / vocab.txt) : %w", vocabErr)
+		// Chargement du tokenizer.json (Unigram SentencePiece)
+		tokPath := filepath.Join(modelDir, "tokenizer.json")
+		var loadErr error
+		vocab, vocabScores, clsID, sepID, unkID, loadErr = loadTokenizer(tokPath)
+		if loadErr != nil {
+			persistErr = fmt.Errorf("chargement tokenizer depuis %s : %w", tokPath, loadErr)
 			return
 		}
 
@@ -146,8 +135,19 @@ func Init() error {
 			[]ort.Value{outTensor},
 			options)
 		if err != nil {
-			persistErr = fmt.Errorf("création session ORT : %w", err)
-			return
+			// XLM-RoBERTa n'a pas de token_type_ids : réessayer sans
+			inputNames = []string{"input_ids", "attention_mask"}
+			inTypes.Destroy()
+			inTypes = nil
+			session, err = ort.NewAdvancedSession(modelPath,
+				inputNames, outputNames,
+				[]ort.Value{inIDs, inMask},
+				[]ort.Value{outTensor},
+				options)
+			if err != nil {
+				persistErr = fmt.Errorf("création session ORT : %w", err)
+				return
+			}
 		}
 
 		initialized = true
@@ -161,58 +161,49 @@ func Embed(_ context.Context, text string) ([]float32, error) {
 		if err := Init(); err != nil {
 			return nil, err
 		}
-		// Après once.Do, vérifier que les tensors sont bien alloués
-		if inIDs == nil || inMask == nil || inTypes == nil || outTensor == nil {
+		if inIDs == nil || inMask == nil || outTensor == nil {
 			return nil, fmt.Errorf("embedder non initialisé : %v", persistErr)
 		}
 	}
 
-	// Tokenisation WordPiece
 	inputIDs, attentionMask, tokenTypeIDs := tokenize(text)
 
 	ortMu.Lock()
 	defer ortMu.Unlock()
 
-	// Copie des données dans les tensors pré-alloués
 	copy(inIDs.GetData(), inputIDs)
 	copy(inMask.GetData(), attentionMask)
-	copy(inTypes.GetData(), tokenTypeIDs)
+	if inTypes != nil {
+		copy(inTypes.GetData(), tokenTypeIDs)
+	}
 
 	if err := session.Run(); err != nil {
 		return nil, err
 	}
 
-	hidden := outTensor.GetData()
-
-	// Mean pooling sur les tokens non-padding, puis normalisation L2
-	return meanPoolAndNormalize(hidden, attentionMask), nil
+	return meanPoolAndNormalize(outTensor.GetData(), attentionMask), nil
 }
 
-// ── Tokenisation WordPiece minimale ─────────────────────────────────────────
+// ── Tokenisation Unigram SentencePiece (Metaspace / ▁) ─────────────────────
 
+// tokenize tokenise `text` avec le tokenizer Unigram SentencePiece.
+// Le modèle E5 attend un préfixe "query: " pour les requêtes.
 func tokenize(text string) (inputIDs, attentionMask, tokenTypeIDs []int32) {
 	inputIDs = make([]int32, MaxTokens)
 	attentionMask = make([]int32, MaxTokens)
 	tokenTypeIDs = make([]int32, MaxTokens)
 
-	words := strings.Fields(strings.ToLower(text))
-	tokens := []int32{clsID}
+	// Préfixe E5 pour les requêtes
+	prefixed := "query: " + text
 
-	for _, word := range words {
-		wt := wordPieceTokenize(word)
-		for _, t := range wt {
-			tokens = append(tokens, t)
-			if len(tokens) >= MaxTokens-1 {
-				goto done
-			}
-		}
-	}
-done:
-	tokens = append(tokens, sepID)
-	if len(tokens) > MaxTokens {
+	tokens := []int32{clsID}
+	tokens = append(tokens, unigramEncode(prefixed)...)
+
+	// Troncature + SEP
+	if len(tokens) >= MaxTokens-1 {
 		tokens = tokens[:MaxTokens-1]
-		tokens = append(tokens, sepID)
 	}
+	tokens = append(tokens, sepID)
 
 	for i, t := range tokens {
 		inputIDs[i] = t
@@ -221,40 +212,67 @@ done:
 	return
 }
 
-func wordPieceTokenize(word string) []int32 {
-	if id, ok := vocab[word]; ok {
-		return []int32{id}
+// unigramEncode encode une chaîne via Metaspace + Viterbi Unigram.
+func unigramEncode(text string) []int32 {
+	// Metaspace : remplacer espaces par ▁ (U+2581), préfixer avec ▁
+	normalized := "▁" + strings.ReplaceAll(text, " ", "▁")
+	return unigramViterbi(normalized)
+}
+
+// unigramViterbi décode le texte en tokens via l'algorithme de Viterbi.
+// Cherche la séquence de tokens maximisant la somme des log-probabilités.
+func unigramViterbi(text string) []int32 {
+	runes := []rune(text)
+	n := len(runes)
+	if n == 0 {
+		return nil
 	}
 
-	var ids []int32
-	runes := []rune(word)
-	start := 0
-	for start < len(runes) {
-		found := false
-		for end := len(runes); end > start; end-- {
-			sub := string(runes[start:end])
-			if start > 0 {
-				sub = "##" + sub
-			}
-			if id, ok := vocab[sub]; ok {
-				ids = append(ids, id)
-				start = end
-				found = true
-				break
-			}
+	const negInf = -1e38
+
+	dp := make([]float64, n+1)
+	type back struct {
+		start int
+		id    int32
+	}
+	from := make([]back, n+1)
+	for i := range dp {
+		dp[i] = negInf
+	}
+	dp[0] = 0.0
+
+	for i := 0; i < n; i++ {
+		if dp[i] == negInf {
+			continue
 		}
-		if !found {
-			// Caractère par caractère en fallback
-			for _, r := range string(runes[start]) {
-				if unicode.IsLetter(r) || unicode.IsDigit(r) {
-					ids = append(ids, unkID)
+		for j := i + 1; j <= n; j++ {
+			sub := string(runes[i:j])
+			if score, ok := vocabScores[sub]; ok {
+				candidate := dp[i] + score
+				if candidate > dp[j] {
+					dp[j] = candidate
+					from[j] = back{i, vocab[sub]}
 				}
 			}
-			start++
+		}
+		// Caractère inconnu : avancer d'un rune avec unkID (pénalité)
+		if dp[i+1] == negInf {
+			dp[i+1] = dp[i] - 100.0
+			from[i+1] = back{i, unkID}
 		}
 	}
-	if len(ids) == 0 {
-		return []int32{unkID}
+
+	// Remontée (backtrace)
+	var ids []int32
+	pos := n
+	for pos > 0 {
+		f := from[pos]
+		ids = append(ids, f.id)
+		pos = f.start
+	}
+	// Inverser
+	for l, r := 0, len(ids)-1; l < r; l, r = l+1, r-1 {
+		ids[l], ids[r] = ids[r], ids[l]
 	}
 	return ids
 }
@@ -262,7 +280,6 @@ func wordPieceTokenize(word string) []int32 {
 // ── Mean pooling + normalisation L2 ─────────────────────────────────────────
 
 func meanPoolAndNormalize(hidden []float32, mask []int32) []float32 {
-	// hidden shape : [1, MaxTokens, Dims] → flatten
 	result := make([]float32, Dims)
 	count := 0
 	for t := 0; t < MaxTokens; t++ {
@@ -291,42 +308,69 @@ func meanPoolAndNormalize(hidden []float32, mask []int32) []float32 {
 	return result
 }
 
-// ── Chargement du vocabulaire ─────────────────────────────────────────────
+// ── Chargement du tokenizer.json (Unigram SentencePiece HuggingFace) ─────────
 
-func loadVocab(path string) (map[string]int32, error) {
+// loadTokenizer charge vocab Unigram + scores depuis tokenizer.json.
+// Format : model.vocab = [[token, score], ...] où position = ID.
+func loadTokenizer(path string) (v map[string]int32, scores map[string]float64, cls, sep, unk int32, err error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
-	}
-	m := make(map[string]int32)
-
-	// Essaie d'abord le format JSON (tokenizer.json de HuggingFace)
-	if filepath.Ext(path) == ".json" {
-		var tj struct {
-			Model struct {
-				Vocab map[string]int32 `json:"vocab"`
-			} `json:"model"`
-		}
-		if err := json.Unmarshal(data, &tj); err == nil && len(tj.Model.Vocab) > 0 {
-			return tj.Model.Vocab, nil
-		}
+		return nil, nil, 0, 2, 3, err
 	}
 
-	// Format texte ligne par ligne (vocab.txt BERT)
-	for i, line := range bytes.Split(data, []byte("\n")) {
-		token := strings.TrimSpace(string(line))
-		if token != "" {
-			m[token] = int32(i)
+	var tj struct {
+		Model struct {
+			Type  string            `json:"type"`
+			UnkID int32             `json:"unk_id"`
+			Vocab []json.RawMessage `json:"vocab"` // [[token, score], ...]
+		} `json:"model"`
+		AddedTokens []struct {
+			ID      int32  `json:"id"`
+			Content string `json:"content"`
+		} `json:"added_tokens"`
+	}
+	if err = json.Unmarshal(data, &tj); err != nil {
+		return nil, nil, 0, 2, 3, fmt.Errorf("parse tokenizer.json : %w", err)
+	}
+	if len(tj.Model.Vocab) == 0 {
+		return nil, nil, 0, 2, 3, fmt.Errorf("vocab vide dans tokenizer.json (type=%s)", tj.Model.Type)
+	}
+
+	v = make(map[string]int32, len(tj.Model.Vocab))
+	scores = make(map[string]float64, len(tj.Model.Vocab))
+	for i, raw := range tj.Model.Vocab {
+		var pair [2]json.RawMessage
+		if jsonErr := json.Unmarshal(raw, &pair); jsonErr != nil {
+			continue
+		}
+		var token string
+		var score float64
+		if jsonErr := json.Unmarshal(pair[0], &token); jsonErr != nil {
+			continue
+		}
+		if jsonErr := json.Unmarshal(pair[1], &score); jsonErr != nil {
+			continue
+		}
+		v[token] = int32(i)
+		scores[token] = score
+	}
+
+	// Tokens spéciaux depuis le vocab (defaults)
+	cls = int32(v["<s>"])
+	sep = int32(v["</s>"])
+	unk = tj.Model.UnkID
+
+	// Priorité aux added_tokens si présents
+	for _, at := range tj.AddedTokens {
+		switch at.Content {
+		case "<s>":
+			cls = at.ID
+		case "</s>":
+			sep = at.ID
 		}
 	}
-	return m, nil
-}
 
-// ── Utilitaire : lecture float32 LE ─────────────────────────────────────────
-
-func float32FromBytes(b []byte) float32 {
-	bits := binary.LittleEndian.Uint32(b)
-	return math.Float32frombits(bits)
+	return v, scores, cls, sep, unk, nil
 }
 
 // ── Détection de la bibliothèque ONNX Runtime ─────────────────────────────
@@ -345,6 +389,9 @@ func findOrtLib() string {
 			return c
 		}
 	}
-	// Laisse ORT chercher dans le PATH système
 	return "libonnxruntime.so"
 }
+
+
+// preTokenize découpe le texte en mots et encode chaque mot en BPE unicode.
+// L'espace précédant un mot (sauf le premier) devient le caractère Ġ (U+0120).
