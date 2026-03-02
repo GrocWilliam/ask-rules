@@ -1,16 +1,10 @@
 # Robots.txt pour Reglomatic
 
-# Autoriser tous les robots pour les pages publiques
 User-agent: *
 Allow: /
 Allow: /import
 
-# Bloquer l'accès à l'administration
 Disallow: /admin/
-Disallow: /admin
-
-# Bloquer l'accès aux fichiers uploadés (contenu sensible)
 Disallow: /files/
 
-# Sitemap
-Sitemap: https://www.reglomatic.fr/sitemap.xml
+Sitemap: /sitemap.xml

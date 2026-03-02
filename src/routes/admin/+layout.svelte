@@ -1,11 +1,21 @@
 <script lang="ts">
   import { page } from '$app/stores';
-  import { enhance } from '$app/forms';
+  import { goto } from '$app/navigation';
   import type { LayoutData } from './$types';
 
   export let data: LayoutData;
 
   let isLoggingOut = false;
+
+  async function handleLogout() {
+    isLoggingOut = true;
+    try {
+      await fetch('/api/admin/logout', { method: 'POST' });
+    } finally {
+      isLoggingOut = false;
+      goto('/admin/login');
+    }
+  }
 </script>
 
 {#if data.isAuthenticated}
@@ -40,21 +50,9 @@
         </a>
       </div>
 
-      <form
-        method="POST"
-        action="/admin/login?/logout"
-        use:enhance={() => {
-          isLoggingOut = true;
-          return async ({ update }) => {
-            await update();
-            isLoggingOut = false;
-          };
-        }}
-      >
-        <button type="submit" class="btn-logout" disabled={isLoggingOut}>
-          {isLoggingOut ? 'Déconnexion...' : '🚪 Se déconnecter'}
-        </button>
-      </form>
+      <button class="btn-logout" disabled={isLoggingOut} on:click={handleLogout}>
+        {isLoggingOut ? 'Déconnexion...' : '🚪 Se déconnecter'}
+      </button>
     </nav>
 
     <main class="admin-content">

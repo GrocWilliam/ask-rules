@@ -561,10 +561,19 @@ details[open] .sources-summary::before {
 /* ── Footer ──────────────────────────────────────────────────────────────────── */
 
 .footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
   text-align: center;
   color: var(--text-faint);
   font-size: 0.8rem;
   padding-top: 1rem;
+}
+
+.footer .version {
+  opacity: 0.6;
+  font-size: 0.75rem;
 }
 
 /* ── Nav ─────────────────────────────────────────────────────────────────────── */

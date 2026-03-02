@@ -1,11 +1,34 @@
 <script lang="ts">
-  import { enhance } from '$app/forms';
-  import type { ActionData } from './$types';
   import SEO from '$lib/SEO.svelte';
+  import { goto } from '$app/navigation';
 
-  export let form: ActionData;
-
+  let error: string | null = null;
   let isLoggingIn = false;
+
+  async function handleLogin(e: SubmitEvent) {
+    e.preventDefault();
+    isLoggingIn = true;
+    error = null;
+    const form = e.target as HTMLFormElement;
+    const pwd = (form.querySelector('#password') as HTMLInputElement).value;
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pwd }),
+      });
+      if (res.ok) {
+        goto('/admin/games');
+      } else {
+        const d = await res.json().catch(() => ({}));
+        error = d.error ?? 'Mot de passe incorrect';
+      }
+    } catch {
+      error = 'Erreur réseau';
+    } finally {
+      isLoggingIn = false;
+    }
+  }
 </script>
 
 <SEO
@@ -24,23 +47,13 @@
       <h1>🔒 Accès Administration</h1>
       <p class="login-subtitle">Veuillez vous authentifier pour accéder à l'administration</p>
 
-      {#if form?.error}
+      {#if error}
         <div class="alert alert-error">
-          ❌ {form.error}
+          ❌ {error}
         </div>
       {/if}
 
-      <form
-        method="POST"
-        action="?/login"
-        use:enhance={() => {
-          isLoggingIn = true;
-          return async ({ update }) => {
-            await update();
-            isLoggingIn = false;
-          };
-        }}
-      >
+      <form on:submit|preventDefault={handleLogin}>
         <div class="form-group">
           <label for="password">Mot de passe</label>
           <input

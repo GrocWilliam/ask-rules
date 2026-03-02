@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { page } from '$app/stores';
+
   export let data: {
     logs: Array<{
       id: number;
@@ -9,10 +11,28 @@
       user_agent: string | null;
       created_at: string;
     }>;
-    logsByDate: Array<[string, typeof data.logs]>;
-    currentFilter: string | null;
-    limit: number;
   };
+
+  // Regrouper les logs par date (calculé côté client)
+  $: currentFilter = $page.url.searchParams.get('type');
+  $: filteredLogs = currentFilter
+    ? data.logs.filter((l) => l.event_type === currentFilter)
+    : data.logs;
+
+  $: logsByDate = (() => {
+    const groups = new Map<string, typeof data.logs>();
+    for (const log of filteredLogs) {
+      const date = new Date(log.created_at).toLocaleDateString('fr-FR', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+      if (!groups.has(date)) groups.set(date, []);
+      groups.get(date)!.push(log);
+    }
+    return [...groups.entries()];
+  })();
 
   const eventTypeLabels: Record<string, string> = {
     game_added: '🎲 Jeu ajouté',
@@ -60,37 +80,37 @@
 
   <!-- Filtres -->
   <div class="filters">
-    <a href="/admin/logs" class="filter-btn" class:active={!data.currentFilter}>Tous</a>
+    <a href="/admin/logs" class="filter-btn" class:active={!currentFilter}>Tous</a>
     <a
       href="/admin/logs?type=game_added"
       class="filter-btn green"
-      class:active={data.currentFilter === 'game_added'}
+      class:active={currentFilter === 'game_added'}
     >
       🎲 Jeux ajoutés
     </a>
     <a
       href="/admin/logs?type=game_updated"
       class="filter-btn blue"
-      class:active={data.currentFilter === 'game_updated'}
+      class:active={currentFilter === 'game_updated'}
     >
       🔄 Mises à jour
     </a>
     <a
       href="/admin/logs?type=rate_limit_blocked"
       class="filter-btn red"
-      class:active={data.currentFilter === 'rate_limit_blocked'}
+      class:active={currentFilter === 'rate_limit_blocked'}
     >
       🚫 IPs bloquées
     </a>
   </div>
 
   <!-- Logs groupés par date -->
-  {#if data.logsByDate.length === 0}
+  {#if logsByDate.length === 0}
     <div class="empty-state">
       <p>Aucun log enregistré</p>
     </div>
   {:else}
-    {#each data.logsByDate as [date, logs]}
+    {#each logsByDate as [date, logs]}
       <section class="date-group">
         <h2 class="date-header">{date}</h2>
         <div class="logs-list">

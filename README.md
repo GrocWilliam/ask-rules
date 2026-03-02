@@ -1,317 +1,245 @@
-# Analyseur de Manuel Utilisateur — PoC NLP
+# ask-rules
 
-Proof of Concept **TypeScript / Node.js** pour analyser des manuels utilisateur
-(PDF ou texte), extraire des informations structurées via NLP, et produire un
-JSON exploitable par un LLM.
+Assistant IA pour interroger des règles de jeux de société en français.
+
+**Stack** : Go 1.22 · SvelteKit (SPA) · PostgreSQL + pgvector · ONNX Runtime · Redis (optionnel)
+
+---
 
 ## Architecture
 
 ```
-analyser-ia/
-├── src/
-│   ├── analyser.ts               # Point d'entrée — orchestration du pipeline
-│   ├── types.ts                  # Interfaces TypeScript partagées
-│   └── modules/
-│       ├── textExtractor.ts      # Extraction texte depuis .pdf ou .txt
-│       ├── sectionParser.ts      # Découpage du texte en sections
-│       ├── nlpProcessor.ts       # Analyse NLP (entités, actions, résumé)
-│       └── embedder.ts           # (Optionnel) Génération d'embeddings
-├── dist/                         # Sortie compilée (tsc)
-├── tsconfig.json
-└── package.json
+ask-rules/
+├── server/                      # Binaire Go — sert tout (API + frontend)
+│   ├── main.go                  # Démarrage, migration auto, graceful shutdown
+│   ├── config/config.go         # Variables d'environnement
+│   ├── db/
+│   │   ├── db.go                # Pool pgx v5, queries
+│   │   └── migrate.go           # Migration DDL idempotente (lancée au démarrage)
+│   ├── embedder/embedder.go     # BERT local via onnxruntime_go (384 dims)
+│   ├── handlers/                # Handlers HTTP Chi
+│   │   ├── ask.go               # POST /api/ask
+│   │   ├── games.go             # CRUD jeux
+│   │   ├── import.go            # ImportSSE, ReprocessGame, ReprocessAll (SSE)
+│   │   ├── files.go             # ServeFile, ListFiles, DeleteFile
+│   │   ├── admin.go             # Login / Logout / Check
+│   │   └── logs.go              # GET /api/admin/logs
+│   ├── pipeline/                # Extraction texte → chunks → embeddings
+│   ├── retriever/               # Hybrid search (vecteur + full-text, RRF)
+│   ├── nlp/nlp.go               # Stopwords FR (~320), GAME_NOUNS (~200), mécaniques
+│   ├── llm/llm.go               # Clients Mistral / OpenAI / Ollama
+│   ├── cache/cache.go           # Redis ou in-memory (SHA-256 key, TTL 24h)
+│   ├── router/router.go         # Chi — routes publiques, admin, SPA fallback
+│   ├── middleware/              # Auth cookie, rate limiting
+│   └── build/                  # SvelteKit statique (go:embed)
+├── src/                         # Frontend SvelteKit (adapter-static)
+│   ├── routes/
+│   │   ├── +page.svelte         # Interface de question/réponse
+│   │   ├── import/              # Import de fichiers (SSE temps réel)
+│   │   └── admin/               # Gestion jeux, fichiers, logs
+│   └── lib/                     # Composants (SEO, Markdown, PWA…)
+├── uploads/                     # Fichiers uploadés (un sous-dossier par jeu)
+├── models/                      # Modèle ONNX (non versionné)
+│   └── multilingual-e5-small/
+├── Dockerfile                   # Multi-stage : web-builder → go-builder → runtime
+└── docs/                        # Guides techniques
 ```
+
+---
 
 ## Prérequis
 
-- Node.js >= 18
-- pnpm (ou npm / yarn)
+- **Go 1.22+**
+- **Node.js 18+ + pnpm**
+- **PostgreSQL 14+** avec l'extension `pgvector`
+- **libonnxruntime.so 1.13.0** (voir ci-dessous)
+- Redis (optionnel)
 
-## Installation
+### Installer libonnxruntime
 
 ```bash
+# Linux x64
+curl -fsSL https://github.com/microsoft/onnxruntime/releases/download/v1.13.0/onnxruntime-linux-x64-1.13.0.tgz \
+  | tar -xz --strip-components=2 -C /usr/local/lib '*/lib/libonnxruntime.so.1.13.0'
+mv /usr/local/lib/libonnxruntime.so.1.13.0 /usr/local/lib/libonnxruntime.so
+ldconfig
+```
+
+### Télécharger le modèle ONNX
+
+```bash
+./scripts/download-model.sh
+# → models/multilingual-e5-small/
+```
+
+---
+
+## Installation et lancement (développement)
+
+```bash
+# 1. Cloner et configurer
+cp .env.example .env    # puis renseigner DATABASE_URL, MISTRAL_API_KEY, etc.
+
+# 2. Installer les dépendances frontend
 pnpm install
 
-docker run -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postrgres -e POSTGRES_DB=ask_rules --name postgres_vector -p 5432:5432 -d ankane/pgvector
+# 3. Builder SvelteKit + Go en une commande
+pnpm run build:all
+
+# 4. Lancer le serveur
+pnpm start              # → http://localhost:3001
 ```
 
-## Utilisation
+### Scripts disponibles
 
-### Développement — exécution directe avec ts-node
+| Commande | Description |
+|---|---|
+| `pnpm run build:web` | Build SvelteKit → `server/build/` |
+| `pnpm run build:go` | Compile le binaire Go |
+| `pnpm run build:all` | Les deux en séquence |
+| `pnpm start` | Lance `server/ask-rules-server` |
+
+---
+
+## Variables d'environnement
+
+| Variable | Défaut | Description |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/ask-rules` | PostgreSQL |
+| `PORT` | `3001` | Port d'écoute |
+| `MISTRAL_API_KEY` | — | LLM Mistral (prioritaire si défini) |
+| `MISTRAL_MODEL` | `mistral-small-latest` | Modèle Mistral |
+| `OPENAI_API_KEY` | — | LLM OpenAI |
+| `OPENAI_MODEL` | `gpt-4o-mini` | Modèle OpenAI |
+| `OLLAMA_HOST` | `http://localhost:11434` | Serveur Ollama |
+| `OLLAMA_MODEL` | — | Modèle Ollama (ex: `llama3`) |
+| `ADMIN_PASSWORD` | `admin` | Mot de passe interface admin |
+| `REDIS_ENABLED` | `false` | Activer le cache Redis |
+| `REDIS_URL` | `redis://localhost:6379` | URL Redis |
+| `UPLOADS_DIR` | `../uploads` | Répertoire des fichiers uploadés |
+| `MODEL_PATH` | `../models/multilingual-e5-small` | Chemin du modèle ONNX |
+
+**Priorité LLM** : Mistral → OpenAI → Ollama. Sans aucune clé, les réponses sont construites uniquement depuis le contexte récupéré (pas de génération).
+
+---
+
+## Docker
 
 ```bash
-# Analyser un fichier texte
-npx ts-node src/analyser.ts data/manuel.txt
+# Build (télécharge le modèle ONNX automatiquement)
+docker build -t ask-rules .
 
-# Analyser un fichier PDF
-npx ts-node src/analyser.ts data/manuel.pdf
-
-# Avec embeddings Transformers.js local (recommandé, multilingue, offline)
-pnpm add @huggingface/transformers  # Installation unique
-npx ts-node src/analyser.ts data/manuel.txt --embed
-# Au 1er lancement : télécharge le modèle (~50MB), puis utilise le cache
-
-# Avec embeddings OpenAI (optionnel)
-OPENAI_API_KEY=sk-... npx ts-node src/analyser.ts data/manuel.txt --embed
-
-# Fichier de sortie personnalisé
-npx ts-node src/analyser.ts data/manuel.txt --output exports/mon_analyse.json
+# Lancement
+docker run -p 3001:3001 \
+  -e DATABASE_URL=postgres://user:pass@host:5432/db \
+  -e MISTRAL_API_KEY=your-key \
+  -v ./uploads:/app/uploads \
+  ask-rules
 ```
 
-### Production — compilation puis exécution
+### docker-compose (recommandé)
 
-```bash
-pnpm run build                         # Compile src/ → dist/
-node dist/analyser.js data/manuel.txt
+```yaml
+services:
+  app:
+    image: ask-rules
+    build: .
+    ports:
+      - "3001:3001"
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/ask_rules
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: ankane/pgvector:latest
+    environment:
+      POSTGRES_DB: ask_rules
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  uploads:
 ```
 
-### Via les scripts npm
+> Le schéma PostgreSQL est créé **automatiquement au démarrage** (`db.Migrate()`). Pas besoin de lancer de script `migrate` séparément.
+> Le modèle ONNX est intégré dans l'image lors du `docker build` — pas de volume `/app/models` requis.
 
-```bash
-pnpm start              # ts-node data/manuel.txt → data/resultat.json
-pnpm run analyse:txt    # Identique
-pnpm run analyse:pdf    # Analyse data/manuel.pdf
-pnpm run build          # Compile TypeScript vers dist/
-pnpm run start:dist     # node dist/ (après build)
-```
+---
 
-## Modes d'embeddings
+## API
 
-Le module `embedder.ts` supporte **3 modes** avec sélection automatique :
+### Publique
 
-### Mode 1 : Transformers.js local (✅ Recommandé)
+| Méthode | Route | Description |
+|---|---|---|
+| `POST` | `/api/ask` | Poser une question sur un jeu |
+| `GET` | `/api/games` | Lister les jeux |
+| `GET` | `/api/games/{id}` | Détail d'un jeu |
+| `GET` | `/files/{slug}/{filename}` | Servir un fichier uploadé |
 
-```bash
-pnpm add @huggingface/transformers  # Installation unique
-npx ts-node src/analyser.ts data/manuel.txt --embed
-```
-
-- **Modèle** : `Xenova/multilingual-e5-small` (384 dims)
-- **Avantages** :
-  - ✅ 100% gratuit et offline (après 1er téléchargement)
-  - ✅ Multilingue optimisé (français, anglais, etc.)
-  - ✅ Pas de clé API requise
-  - ✅ Exécution locale en Node.js
-- **1er lancement** : Télécharge automatiquement le modèle (~50MB), puis cache local
-
-### Mode 2 : OpenAI (optionnel)
-
-```bash
-export OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxx
-pnpm add openai  # Installation requise
-npx ts-node src/analyser.ts data/manuel.txt --embed
-```
-
-- **Modèle** : `text-embedding-3-small` (1536 dims)
-- **Avantages** : Très performant, multilingue
-- **Inconvénients** : Payant, nécessite une connexion internet
-
-### Mode 3 : TF-IDF local (fallback)
-
-```bash
-# Automatique si aucun embedding disponible
-npx ts-node src/analyser.ts data/manuel.txt --embed
-```
-
-- **Avantages** : Aucune dépendance externe, ultra-léger
-- **Inconvénients** : Qualité inférieure aux embeddings neuronaux
-
-**Ordre de priorité** : Transformers.js → OpenAI → TF-IDF.
-
-## Cache Redis
-
-Pour réduire les coûts d'API et améliorer les performances, un système de cache Redis a été intégré :
-
-### Configuration
-
-```bash
-# 1. Lancer Redis (Docker)
-docker run -d -p 6379:6379 --name reglomatic-redis redis:7-alpine
-
-# 2. Configurer l'application (.env)
-REDIS_URL=redis://localhost:6379
-
-# 3. Installer les dépendances
-pnpm install
-```
-
-### Fonctionnement
-
-- ✅ **Cache automatique** : Les questions/réponses sont mises en cache pendant 24h
-- ✅ **Normalisation** : Les questions similaires utilisent le même cache
-- ✅ **Mode graceful** : Si Redis n'est pas disponible, l'app continue sans cache
-- ⚡ **Performance** : ~50-200ms depuis le cache vs 1-5s depuis le LLM
-
-### Documentation complète
-
-Consultez [docs/REDIS_CACHE_GUIDE.md](docs/REDIS_CACHE_GUIDE.md) pour :
-
-- Configuration détaillée
-- Services Redis managés (AWS, Redis Cloud, etc.)
-- Commandes de monitoring
-- Dépannage
-
-## Protection Anti-Spam
-
-Un système de rate limiting protège l'application contre les abus :
-
-### Fonctionnement
-
-- 🛡️ **Limite** : Maximum 10 questions par minute par IP
-- ⏱️ **Blocage** : 5 minutes après dépassement
-- 🎯 **Détection IP** : Support des proxies (X-Forwarded-For, X-Real-IP)
-- ✅ **Whitelist** : IPs exemptées configurables
-
-### Configuration
-
-```env
-# Optionnel : IPs exemptées du rate limiting
-RATE_LIMIT_WHITELIST=127.0.0.1,::1
-```
-
-### Documentation complète
-
-Consultez [docs/RATE_LIMITING_GUIDE.md](docs/RATE_LIMITING_GUIDE.md) pour :
-
-- Personnalisation des limites
-- Monitoring et statistiques
-- Déblocage manuel d'IPs
-- Tests et sécurité en production
-
-## Système de Logs
-
-Tous les événements importants sont enregistrés en base de données :
-
-### Événements loggés
-
-- 🎲 **Ajout/mise à jour de jeux** : Traçabilité des imports
-- 🚫 **Blocages anti-spam** : IPs bloquées par le rate limiter
-- 📊 **Statistiques** : Analyse de l'utilisation
-
-### Interface d'administration
-
-Accessible via `/admin/logs` avec :
-
-- Affichage chronologique groupé par date
-- Filtres par type d'événement
-- Détails complets (métadonnées, IP, user agent)
-
-### Documentation complète
-
-Consultez [docs/LOGS_GUIDE.md](docs/LOGS_GUIDE.md) pour :
-
-- Structure de la table et index
-- API de logging
-- Nettoyage et archivage
-- Monitoring et alertes
-- Considérations RGPD
-
-## Format de sortie (resultat.json)
-
+**Body `/api/ask`** :
 ```json
-{
-  "manuel": "manuel",
-  "fichier": "/chemin/absolu/data/manuel.txt",
-  "date_analyse": "2026-02-20T10:00:00.000Z",
-  "statistiques": {
-    "caracteres": 7829,
-    "mots": 974,
-    "sections": 22,
-    "entites_total": 44,
-    "actions_total": 89
-  },
-  "sections": [
-    {
-      "titre": "INSTALLATION",
-      "contenu": "Follow the steps below to install SmartFlow Pro...",
-      "entites": ["configure", "download", "engine", "finish"],
-      "actions": ["accept", "click", "choose", "complete", "download"],
-      "resume": "Follow the steps below to install SmartFlow Pro on your machine.",
-      "embedding": { "install": 0.42, "wizard": 0.31, "database": 0.28 }
-    }
-  ]
-}
+{ "question": "Comment gagner ?", "jeu": "Catan", "jeu_id": "optional-uuid" }
 ```
 
-## Bibliothèques utilisées
+### Admin (cookie `admin_session` requis)
 
-| Bibliothèque | Usage                                           | Licence    |
-| ------------ | ----------------------------------------------- | ---------- |
-| `compromise` | NLP : extraction d'entités et de verbes         | MIT        |
-| `pdfreader`  | Extraction de texte depuis des PDFs             | Apache 2.0 |
-| `chalk`      | Affichage coloré dans le terminal               | MIT        |
-| `typescript` | Compilation et typage statique                  | Apache 2.0 |
-| `ts-node`    | Exécution TypeScript sans compilation préalable | MIT        |
+| Méthode | Route | Description |
+|---|---|---|
+| `POST` | `/api/admin/login` | Connexion |
+| `POST` | `/api/admin/logout` | Déconnexion |
+| `GET` | `/api/admin/check` | Vérifier la session |
+| `GET` | `/api/admin/games` | Lister les jeux |
+| `POST` | `/api/admin/games` | Créer / mettre à jour un jeu |
+| `DELETE` | `/api/admin/games/{id}` | Supprimer un jeu |
+| `GET` | `/api/admin/files` | Lister les fichiers uploadés |
+| `DELETE` | `/api/admin/files/{slug}/{filename}` | Supprimer un fichier |
+| `GET` | `/api/admin/logs` | Logs récents (`?limit=N`) |
+| `POST` | `/api/import` | Importer un fichier (SSE) |
+| `POST` | `/api/admin/reprocess` | Retraiter un jeu (SSE) |
+| `POST` | `/api/admin/reprocess-all` | Retraiter tous les jeux (SSE) |
 
-## Interfaces TypeScript (src/types.ts)
+---
 
-```typescript
-interface Section {
-  titre: string;
-  contenu: string;
-  entites: string[];
-  actions: string[];
-  resume: string;
-  embedding?: number[] | Record<string, number> | null;
-}
+## Embeddings
 
-interface AnalysisResult {
-  manuel: string;
-  fichier: string;
-  date_analyse: string;
-  statistiques: Statistics;
-  sections: Section[];
-}
-```
+Le module `server/embedder/` charge le modèle **multilingual-e5-small** directement via `onnxruntime_go` (CGO). Aucun serveur Python requis.
 
-## Support du français
+- **Dimensions** : 384
+- **Langue** : multilingue (optimal pour le français)
+- **Session** : tensors pré-alloués, `copy()` avant chaque `Run()` — thread-safe
 
-`compromise` est optimisé pour l'anglais. Pour analyser des textes en français :
+Si `libonnxruntime.so` ou le modèle est absent au démarrage, le serveur continue sans embeddings (recherche full-text uniquement).
 
-**Option 1 — Plugin compromise-fr**
+---
 
-```bash
-pnpm add compromise-fr
-```
+## Recherche hybride
 
-```typescript
-import nlp from 'compromise';
-import frPlugin from 'compromise-fr';
-nlp.extend(frPlugin);
-```
+`server/retriever/` combine :
+1. **Recherche vectorielle** — cosinus via `pgvector` (index HNSW)
+2. **Full-text search** — `plainto_tsquery('french', ...)` sur `tsvector` pondéré (titre A, hierarchy_path B, contenu C)
+3. **Fusion RRF** (Reciprocal Rank Fusion) — reclassement des deux listes
 
-**Option 2 — nlp.js (support multilingue natif)**
+---
 
-```bash
-pnpm add node-nlp @nlpjs/lang-fr
-```
+## Interface d'administration
 
-Voir [documentation nlp.js](https://github.com/axa-group/nlp.js)
+Accessible sur `/admin` (mot de passe via `ADMIN_PASSWORD`) :
 
-## Extension : base vectorielle
-
-Pour indexer les embeddings dans une base vectorielle et interroger le manuel
-depuis un LLM, vous pouvez utiliser :
-
-- **[ChromaDB](https://www.trychroma.com/)** — base vectorielle locale, SDK JS disponible
-- **[pgvector](https://github.com/pgvector/pgvector)** — extension PostgreSQL
-- **[Weaviate](https://weaviate.io/)** — base vectorielle cloud/local
-
-Exemple d'indexation avec Chroma :
-
-```typescript
-import { ChromaClient } from 'chromadb';
-import type { AnalysisResult } from './src/types';
-
-const client = new ChromaClient();
-const collection = await client.createCollection({ name: 'manuel' });
-const resultat: AnalysisResult = JSON.parse(fs.readFileSync('data/resultat.json', 'utf-8'));
-
-for (const section of resultat.sections) {
-  await collection.add({
-    ids: [section.titre],
-    embeddings: [section.embedding as number[]], // vecteur OpenAI dense
-    documents: [section.contenu],
-    metadatas: [{ actions: section.actions.join(',') }],
-  });
-}
-```
+- **`/admin/games`** — liste des jeux avec nombre de sections, retraitement individuel ou global (suivi SSE temps réel)
+- **`/admin/files`** — fichiers uploadés groupés par jeu, suppression
+- **`/admin/logs`** — journal des événements groupé par date
+- **`/import`** — import de nouveaux fichiers avec progression live (SSE)

@@ -1,28 +1,132 @@
 <script lang="ts">
-  import { enhance } from '$app/forms';
-  import type { PageData, ActionData } from './$types';
+  import { invalidateAll } from '$app/navigation';
+  import type { PageData } from './$types';
   import SEO from '$lib/SEO.svelte';
 
   export let data: PageData;
-  export let form: ActionData;
 
+  let actionMsg: { ok: boolean; msg: string } | null = null;
   let deletingGame: string | null = null;
   let confirmDelete: string | null = null;
   let reprocessingGame: string | null = null;
-  let reprocessingAll = false;
+
+  // ── Reprocess All ──────────────────────────────────────────────────────────
+  type GameProgress = {
+    name: string;
+    status: 'pending' | 'running' | 'done' | 'error';
+    msg?: string;
+  };
+
+  let reprocessAllActive = false;
+  let reprocessAllDone = false;
+  let reprocessAllTotal = 0;
+  let reprocessAllCurrent = 0;
+  let reprocessAllSuccesses = 0;
+  let reprocessAllErrors = 0;
+  let reprocessAllLog: string[] = [];
+  let reprocessAllGameList: GameProgress[] = [];
+  let reprocessAllCurrentGame = '';
+  let reprocessAllEmbedding: { current: number; total: number } | null = null;
+
+  async function reprocessAll() {
+    reprocessAllActive = true;
+    reprocessAllDone = false;
+    reprocessAllCurrent = 0;
+    reprocessAllSuccesses = 0;
+    reprocessAllErrors = 0;
+    reprocessAllLog = [];
+    reprocessAllGameList = [];
+    reprocessAllCurrentGame = '';
+    reprocessAllEmbedding = null;
+
+    try {
+      const res = await fetch('/api/admin/reprocess-all', { method: 'POST' });
+      if (!res.body) throw new Error('Pas de stream SSE');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let evt: Record<string, unknown>;
+          try {
+            evt = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+
+          const t = evt.type as string;
+
+          if (t === 'start') {
+            reprocessAllTotal = evt.total as number;
+            reprocessAllGameList = data.games.map((g: any) => ({
+              name: g.name,
+              status: 'pending' as const,
+            }));
+          } else if (t === 'game_start') {
+            reprocessAllCurrent = evt.index as number;
+            reprocessAllCurrentGame = evt.game as string;
+            reprocessAllEmbedding = null;
+            reprocessAllGameList = reprocessAllGameList.map((g) =>
+              g.name === evt.game ? { ...g, status: 'running' } : g
+            );
+            reprocessAllLog = [...reprocessAllLog, `▶ [${evt.index}/${evt.total}] ${evt.game}`];
+          } else if (t === 'step') {
+            reprocessAllLog = [...reprocessAllLog, `  · ${evt.message}`];
+          } else if (t === 'embedding_start') {
+            reprocessAllEmbedding = { current: 0, total: evt.total as number };
+          } else if (t === 'embedding_progress') {
+            reprocessAllEmbedding = { current: evt.current as number, total: evt.total as number };
+          } else if (t === 'game_done') {
+            reprocessAllSuccesses++;
+            reprocessAllEmbedding = null;
+            reprocessAllGameList = reprocessAllGameList.map((g) =>
+              g.name === evt.game ? { ...g, status: 'done' } : g
+            );
+            reprocessAllLog = [...reprocessAllLog, `  ✅ Terminé`];
+          } else if (t === 'game_error') {
+            reprocessAllErrors++;
+            reprocessAllEmbedding = null;
+            reprocessAllGameList = reprocessAllGameList.map((g) =>
+              g.name === evt.game ? { ...g, status: 'error', msg: evt.error as string } : g
+            );
+            reprocessAllLog = [...reprocessAllLog, `  ❌ Erreur: ${evt.error}`];
+          } else if (t === 'complete') {
+            reprocessAllDone = true;
+            reprocessAllLog = [
+              ...reprocessAllLog,
+              `✅ Terminé — ${evt.success}/${evt.total} jeux retraités en ${((evt.duration as number) / 1000).toFixed(1)}s`,
+            ];
+          } else if (t === 'error') {
+            reprocessAllLog = [...reprocessAllLog, `❌ ${evt.error}`];
+            reprocessAllDone = true;
+          }
+        }
+      }
+    } catch (e: any) {
+      reprocessAllLog = [...reprocessAllLog, `❌ Erreur réseau: ${e.message}`];
+    } finally {
+      reprocessAllActive = false;
+      reprocessAllDone = true;
+      reprocessAllCurrentGame = '';
+    }
+  }
 
   function handleDeleteClick(gameId: string) {
-    if (confirmDelete === gameId) {
-      confirmDelete = null;
-    } else {
-      confirmDelete = gameId;
-    }
+    confirmDelete = confirmDelete === gameId ? null : gameId;
   }
 
   function formatDate(dateString: string | null) {
     if (!dateString) return 'Date inconnue';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('fr-FR', {
+    return new Date(dateString).toLocaleDateString('fr-FR', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
@@ -35,6 +139,47 @@
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
   }
+
+  async function deleteGame(gameId: string) {
+    deletingGame = gameId;
+    try {
+      const res = await fetch(`/api/admin/games/${gameId}`, { method: 'DELETE' });
+      if (res.ok) {
+        actionMsg = { ok: true, msg: 'Jeu supprimé avec succès' };
+        confirmDelete = null;
+        await invalidateAll();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        actionMsg = { ok: false, msg: d.error ?? 'Erreur lors de la suppression' };
+      }
+    } catch {
+      actionMsg = { ok: false, msg: 'Erreur réseau' };
+    } finally {
+      deletingGame = null;
+    }
+  }
+
+  async function reprocessGame(gameId: string) {
+    reprocessingGame = gameId;
+    try {
+      const res = await fetch('/api/admin/reprocess', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game_id: gameId }),
+      });
+      if (res.ok) {
+        actionMsg = { ok: true, msg: 'Recalcul lancé' };
+        await invalidateAll();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        actionMsg = { ok: false, msg: d.error ?? 'Erreur recalcul' };
+      }
+    } catch {
+      actionMsg = { ok: false, msg: 'Erreur réseau' };
+    } finally {
+      reprocessingGame = null;
+    }
+  }
 </script>
 
 <SEO title="Gestion des Jeux - Admin" description="Interface d'administration des jeux" />
@@ -46,51 +191,106 @@
 <div class="page-header">
   <div>
     <h1>🎮 Gestion des Jeux</h1>
-    <p class="summary">{data.summary}</p>
+    <p class="summary">{data.games?.length ?? 0} jeu(x) dans la base</p>
   </div>
   <div class="header-actions">
-    <form
-      method="POST"
-      action="?/reprocessAll"
-      use:enhance={() => {
-        reprocessingAll = true;
-        return async ({ update }) => {
-          await update();
-          reprocessingAll = false;
-        };
-      }}
-    >
-      <button
-        type="submit"
-        class="btn btn-secondary"
-        disabled={reprocessingAll || data.games.length === 0}
-      >
-        {#if reprocessingAll}
-          <span class="spinner" aria-hidden="true"></span>
-          Recalcul...
-        {:else}
-          🔄 Tout recalculer
-        {/if}
-      </button>
-    </form>
+    <button class="btn btn-warning" on:click={reprocessAll} disabled={reprocessAllActive}>
+      {#if reprocessAllActive}
+        <span class="spinner-small" aria-hidden="true"></span>Recalcul en cours...
+      {:else}
+        🔄 Tout recalculer
+      {/if}
+    </button>
     <a href="/import" class="btn btn-primary">+ Importer un jeu</a>
   </div>
 </div>
 
-{#if form?.success}
-  <div class="alert alert-success">✅ {form.message}</div>
+{#if actionMsg?.ok}
+  <div class="alert alert-success">✅ {actionMsg.msg}</div>
+{/if}
+{#if actionMsg && !actionMsg.ok}
+  <div class="alert alert-error">❌ {actionMsg.msg}</div>
 {/if}
 
-{#if form?.error}
-  <div class="alert alert-error">❌ {form.error}</div>
+{#if reprocessAllActive || reprocessAllDone}
+  <div class="reprocess-panel">
+    <div class="reprocess-header">
+      <h3>🔄 Recalcul global</h3>
+      {#if reprocessAllDone}
+        <button
+          class="btn-close"
+          on:click={() => {
+            reprocessAllDone = false;
+            reprocessAllLog = [];
+            reprocessAllGameList = [];
+          }}>✕</button
+        >
+      {/if}
+    </div>
+
+    {#if reprocessAllTotal > 0}
+      <div class="reprocess-progress-bar-wrap">
+        <div
+          class="reprocess-progress-bar"
+          style="width: {Math.round((reprocessAllCurrent / reprocessAllTotal) * 100)}%"
+        ></div>
+      </div>
+      <div class="reprocess-stats">
+        <span>{reprocessAllCurrent} / {reprocessAllTotal} jeux</span>
+        {#if reprocessAllErrors > 0}<span class="stat-error">{reprocessAllErrors} erreur(s)</span
+          >{/if}
+        {#if reprocessAllDone && reprocessAllSuccesses > 0}<span class="stat-ok"
+            >{reprocessAllSuccesses} succès</span
+          >{/if}
+      </div>
+    {/if}
+
+    {#if reprocessAllCurrentGame && !reprocessAllDone}
+      <div class="reprocess-current">
+        Traitement : <strong>{reprocessAllCurrentGame}</strong>
+        {#if reprocessAllEmbedding}
+          — embeddings {reprocessAllEmbedding.current}/{reprocessAllEmbedding.total}
+          <div class="embed-bar-wrap">
+            <div
+              class="embed-bar"
+              style="width: {Math.round(
+                (reprocessAllEmbedding.current / reprocessAllEmbedding.total) * 100
+              )}%"
+            ></div>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    {#if reprocessAllGameList.length > 0}
+      <div class="game-status-list">
+        {#each reprocessAllGameList as gp}
+          <div class="game-status-row game-status-{gp.status}">
+            {#if gp.status === 'pending'}⏳
+            {:else if gp.status === 'running'}<span class="spinner-small"></span>
+            {:else if gp.status === 'done'}✅
+            {:else}❌
+            {/if}
+            {gp.name}
+            {#if gp.msg}<span class="gp-error"> — {gp.msg}</span>{/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    <details class="reprocess-log">
+      <summary>Journal détaillé ({reprocessAllLog.length} entrées)</summary>
+      <pre>{reprocessAllLog.join('\n')}</pre>
+    </details>
+  </div>
 {/if}
 
 <div class="games-grid">
   {#each data.games as game}
     <div class="game-card">
       <div class="game-header">
-        <h2>{game.jeu}</h2>
-        <span class="badge">{game.sectionsCount} sections</span>
+        <h2>{game.name}</h2>
+        <span class="badge">{game.sections_count} sections</span>
       </div>
 
       <div class="game-info">
@@ -100,22 +300,22 @@
         </div>
         <div class="info-row">
           <span class="label">Fichier:</span>
-          <span class="value file-name">{game.fichier}</span>
+          <span class="value file-name">{game.file_path}</span>
         </div>
         <div class="info-row">
           <span class="label">Date d'ajout:</span>
-          <span class="value">{formatDate(game.date_ajout)}</span>
+          <span class="value">{formatDate(game.added_at)}</span>
         </div>
-        {#if game.statistiques?.pageCount}
+        {#if game.stats?.pageCount}
           <div class="info-row">
             <span class="label">Pages:</span>
-            <span class="value">{game.statistiques.pageCount}</span>
+            <span class="value">{game.stats.pageCount}</span>
           </div>
         {/if}
-        {#if game.statistiques?.fileSize}
+        {#if game.stats?.fileSize}
           <div class="info-row">
             <span class="label">Taille:</span>
-            <span class="value">{formatFileSize(game.statistiques.fileSize)}</span>
+            <span class="value">{formatFileSize(game.stats.fileSize)}</span>
           </div>
         {/if}
         {#if game.metadata?.mecaniques?.length}
@@ -134,63 +334,33 @@
       </div>
 
       <div class="game-actions">
-        <form
-          method="POST"
-          action="?/reprocess"
-          use:enhance={() => {
-            reprocessingGame = game.id;
-            return async ({ update }) => {
-              await update();
-              reprocessingGame = null;
-            };
-          }}
+        <button
+          class="btn btn-secondary-outline"
+          on:click={() => reprocessGame(game.id)}
+          disabled={reprocessingGame === game.id}
+          title="Recalculer les embeddings avec le modèle actuel"
         >
-          <input type="hidden" name="gameId" value={game.id} />
-          <button
-            type="submit"
-            class="btn btn-secondary-outline"
-            disabled={reprocessingGame === game.id}
-            title="Recalculer les embeddings avec le modèle actuel"
-          >
-            {#if reprocessingGame === game.id}
-              <span class="spinner-small" aria-hidden="true"></span>
-              Recalcul...
-            {:else}
-              🔄 Recalculer
-            {/if}
-          </button>
-        </form>
-
-        <form
-          method="POST"
-          action="?/delete"
-          use:enhance={() => {
-            deletingGame = game.id;
-            return async ({ update }) => {
-              await update();
-              deletingGame = null;
-              confirmDelete = null;
-            };
-          }}
-        >
-          <input type="hidden" name="gameId" value={game.id} />
-          {#if confirmDelete === game.id}
-            <button type="submit" class="btn btn-danger" disabled={deletingGame === game.id}>
-              {deletingGame === game.id ? 'Suppression...' : 'Confirmer'}
-            </button>
-            <button type="button" class="btn btn-secondary" on:click={() => (confirmDelete = null)}>
-              Annuler
-            </button>
+          {#if reprocessingGame === game.id}
+            <span class="spinner-small" aria-hidden="true"></span>Recalcul...
           {:else}
-            <button
-              type="button"
-              class="btn btn-danger-outline"
-              on:click={() => handleDeleteClick(game.id)}
-            >
-              🗑️ Supprimer
-            </button>
+            🔄 Recalculer
           {/if}
-        </form>
+        </button>
+
+        {#if confirmDelete === game.id}
+          <button
+            class="btn btn-danger"
+            disabled={deletingGame === game.id}
+            on:click={() => deleteGame(game.id)}
+          >
+            {deletingGame === game.id ? 'Suppression...' : 'Confirmer'}
+          </button>
+          <button class="btn btn-secondary" on:click={() => (confirmDelete = null)}>Annuler</button>
+        {:else}
+          <button class="btn btn-danger-outline" on:click={() => handleDeleteClick(game.id)}>
+            🗑️ Supprimer
+          </button>
+        {/if}
       </div>
     </div>
   {/each}
@@ -351,11 +521,6 @@
     flex-wrap: wrap;
   }
 
-  .game-actions form {
-    display: flex;
-    gap: 0.5rem;
-  }
-
   .btn {
     padding: 0.625rem 1.25rem;
     border-radius: 8px;
@@ -375,6 +540,21 @@
 
   .btn-primary:hover {
     background: #4338ca;
+  }
+
+  .btn-warning {
+    background: #d97706;
+    color: white;
+  }
+
+  .btn-warning:hover:not(:disabled) {
+    background: #b45309;
+  }
+
+  .btn-warning:disabled {
+    background: #fcd34d;
+    color: #78350f;
+    cursor: not-allowed;
   }
 
   .btn-danger {
@@ -433,7 +613,6 @@
     cursor: not-allowed;
   }
 
-  .spinner,
   .spinner-small {
     display: inline-block;
     width: 1em;
@@ -471,5 +650,158 @@
     font-size: 1.125rem;
     color: #6b7280;
     margin-bottom: 1.5rem;
+  }
+
+  /* ── Panneau Reprocess All ─────────────────────────────────────────── */
+  .reprocess-panel {
+    background: #1e1e2e;
+    color: #cdd6f4;
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    font-family: monospace;
+    font-size: 0.9rem;
+  }
+
+  .reprocess-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .reprocess-header h3 {
+    margin: 0;
+    color: #cba6f7;
+    font-size: 1rem;
+    font-family: inherit;
+  }
+
+  .btn-close {
+    background: transparent;
+    border: none;
+    color: #6c7086;
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 0 0.25rem;
+    line-height: 1;
+  }
+
+  .btn-close:hover {
+    color: #cdd6f4;
+  }
+
+  .reprocess-progress-bar-wrap {
+    background: #313244;
+    border-radius: 6px;
+    height: 8px;
+    margin-bottom: 0.5rem;
+    overflow: hidden;
+  }
+
+  .reprocess-progress-bar {
+    height: 100%;
+    background: #a6e3a1;
+    border-radius: 6px;
+    transition: width 0.4s ease;
+  }
+
+  .reprocess-stats {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.8rem;
+    color: #9399b2;
+    margin-bottom: 1rem;
+  }
+
+  .stat-error {
+    color: #f38ba8;
+  }
+  .stat-ok {
+    color: #a6e3a1;
+  }
+
+  .reprocess-current {
+    color: #89dceb;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+  }
+
+  .embed-bar-wrap {
+    display: inline-block;
+    width: 120px;
+    height: 4px;
+    background: #313244;
+    border-radius: 4px;
+    vertical-align: middle;
+    margin-left: 0.5rem;
+    overflow: hidden;
+  }
+
+  .embed-bar {
+    height: 100%;
+    background: #89b4fa;
+    border-radius: 4px;
+    transition: width 0.2s;
+  }
+
+  .game-status-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .game-status-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+  }
+
+  .game-status-running {
+    background: #313244;
+    color: #cba6f7;
+  }
+  .game-status-done {
+    color: #a6e3a1;
+  }
+  .game-status-error {
+    color: #f38ba8;
+  }
+  .game-status-pending {
+    color: #6c7086;
+  }
+
+  .gp-error {
+    font-size: 0.8rem;
+    color: #f38ba8;
+  }
+
+  .reprocess-log {
+    margin-top: 0.75rem;
+  }
+
+  .reprocess-log summary {
+    cursor: pointer;
+    color: #9399b2;
+    font-size: 0.8rem;
+    user-select: none;
+  }
+
+  .reprocess-log pre {
+    margin-top: 0.5rem;
+    background: #181825;
+    border-radius: 6px;
+    padding: 0.75rem;
+    font-size: 0.78rem;
+    max-height: 250px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    color: #a6adc8;
   }
 </style>

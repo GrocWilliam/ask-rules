@@ -2,6 +2,7 @@
   import '../app.css';
   import { page } from '$app/stores';
   import PWAInstall from '$lib/PWAInstall.svelte';
+  import CookieConsent from '$lib/CookieConsent.svelte';
 </script>
 
 <nav class="nav">
@@ -17,3 +18,4 @@
 <slot />
 
 <PWAInstall />
+<CookieConsent />

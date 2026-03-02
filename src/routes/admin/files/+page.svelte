@@ -1,19 +1,35 @@
 <script lang="ts">
-  import { enhance } from '$app/forms';
-  import type { PageData, ActionData } from './$types';
+  import type { PageData } from './$types';
   import SEO from '$lib/SEO.svelte';
 
   export let data: PageData;
-  export let form: ActionData;
 
+  let files: any[] = data.files as any[];
   let deletingFile: string | null = null;
   let confirmDelete: string | null = null;
+  let toast: { ok: boolean; msg: string } | null = null;
 
   function handleDeleteClick(filePath: string) {
-    if (confirmDelete === filePath) {
+    confirmDelete = confirmDelete === filePath ? null : filePath;
+  }
+
+  async function deleteFile(file: any) {
+    deletingFile = file.path;
+    try {
+      const [slug, filename] = file.relativePath.split('/');
+      const res = await fetch(`/api/admin/files/${slug}/${filename}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const text = await res.text();
+        toast = { ok: false, msg: text || 'Erreur lors de la suppression' };
+      } else {
+        files = files.filter((f: any) => f.path !== file.path);
+        toast = { ok: true, msg: `Fichier « ${file.name} » supprimé.` };
+      }
+    } catch {
+      toast = { ok: false, msg: 'Erreur réseau' };
+    } finally {
+      deletingFile = null;
       confirmDelete = null;
-    } else {
-      confirmDelete = filePath;
     }
   }
 
@@ -25,8 +41,7 @@
   }
 
   function formatDate(dateString: string) {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('fr-FR', {
+    return new Date(dateString).toLocaleDateString('fr-FR', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
@@ -36,12 +51,10 @@
   }
 
   function getFileExtension(filename: string) {
-    const ext = filename.split('.').pop()?.toLowerCase();
-    return ext || '';
+    return filename.split('.').pop()?.toLowerCase() || '';
   }
 
   function getFileIcon(filename: string) {
-    const ext = getFileExtension(filename);
     const icons: Record<string, string> = {
       pdf: '📄',
       txt: '📝',
@@ -50,19 +63,17 @@
       json: '📋',
       md: '📝',
     };
-    return icons[ext] || '📎';
+    return icons[getFileExtension(filename)] || '📎';
   }
 
   // Grouper les fichiers par jeu
-  $: filesByGame = data.files.reduce(
-    (acc: Record<string, typeof data.files>, file) => {
-      if (!acc[file.game]) {
-        acc[file.game] = [];
-      }
+  $: filesByGame = files.reduce(
+    (acc: Record<string, any[]>, file: any) => {
+      if (!acc[file.game]) acc[file.game] = [];
       acc[file.game].push(file);
       return acc;
     },
-    {} as Record<string, typeof data.files>
+    {} as Record<string, any[]>
   );
 </script>
 
@@ -76,22 +87,19 @@
   <div>
     <h1>📁 Gestion des Fichiers</h1>
     <p class="summary">
-      {data.stats.totalFiles} fichier(s) • {formatFileSize(data.stats.totalSize)} • {data.stats
-        .gamesCount}
-      jeu(x)
+      {files.length} fichier(s)
     </p>
   </div>
 </div>
 
-{#if form?.success}
-  <div class="alert alert-success">✅ {form.message}</div>
+{#if toast?.ok}
+  <div class="alert alert-success">✅ {toast.msg}</div>
+{/if}
+{#if toast && !toast.ok}
+  <div class="alert alert-error">❌ {toast.msg}</div>
 {/if}
 
-{#if form?.error}
-  <div class="alert alert-error">❌ {form.error}</div>
-{/if}
-
-{#if data.files.length === 0}
+{#if files.length === 0}
   <div class="empty-state">
     <p>Aucun fichier uploadé pour le moment.</p>
     <a href="/import" class="btn btn-primary">Importer des règles</a>
@@ -125,44 +133,22 @@
                   👁️ Voir
                 </a>
 
-                <form
-                  method="POST"
-                  action="?/delete"
-                  use:enhance={() => {
-                    deletingFile = file.path;
-                    return async ({ update }) => {
-                      await update();
-                      deletingFile = null;
-                      confirmDelete = null;
-                    };
-                  }}
-                >
-                  <input type="hidden" name="filePath" value={file.path} />
-                  {#if confirmDelete === file.path}
-                    <button
-                      type="submit"
-                      class="btn btn-danger-sm"
-                      disabled={deletingFile === file.path}
-                    >
-                      {deletingFile === file.path ? '...' : 'Confirmer'}
-                    </button>
-                    <button
-                      type="button"
-                      class="btn btn-secondary-sm"
-                      on:click={() => (confirmDelete = null)}
-                    >
-                      Annuler
-                    </button>
-                  {:else}
-                    <button
-                      type="button"
-                      class="btn btn-delete"
-                      on:click={() => handleDeleteClick(file.path)}
-                    >
-                      🗑️
-                    </button>
-                  {/if}
-                </form>
+                {#if confirmDelete === file.path}
+                  <button
+                    class="btn btn-danger-sm"
+                    disabled={deletingFile === file.path}
+                    on:click={() => deleteFile(file)}
+                  >
+                    {deletingFile === file.path ? '...' : 'Confirmer'}
+                  </button>
+                  <button class="btn btn-secondary-sm" on:click={() => (confirmDelete = null)}
+                    >Annuler</button
+                  >
+                {:else}
+                  <button class="btn btn-delete" on:click={() => handleDeleteClick(file.path)}>
+                    🗑️
+                  </button>
+                {/if}
               </div>
             </div>
           {/each}
@@ -309,11 +295,6 @@
     gap: 0.5rem;
     align-items: center;
     flex-shrink: 0;
-  }
-
-  .file-actions form {
-    display: flex;
-    gap: 0.5rem;
   }
 
   .btn {

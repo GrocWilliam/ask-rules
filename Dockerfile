@@ -1,64 +1,112 @@
 # syntax=docker/dockerfile:1
 # ════════════════════════════════════════════════════════════════════════════
-# reglomatic — Image de production
-# SvelteKit (adapter-node) + pgvector + modèle d'embedding local
+# ask-rules — Image de production
+# Architecture : SvelteKit (adapter-static, embarqué) + binaire Go + onnxruntime
 #
-# Construction : docker build -t reglomatic .
-# Lancement    : docker run -p 3000:3000 \
-#                  -e DATABASE_URL=... \
-#                  -e MISTRAL_API_KEY=... \
-#                  reglomatic
+# Construction : docker build -t ask-rules .
+#
+# Lancement :
+#   docker run -p 3001:3001 \
+#     -e DATABASE_URL=postgresql://.... \
+#     -e MISTRAL_API_KEY=.... \
+#     ask-rules
+# 
+# Le modèle ONNX est intégré dans l'image (téléchargé au docker build).
 # ════════════════════════════════════════════════════════════════════════════
 
-# ── Stage 1 : Dépendances (dev + prod, nécessaires au build) ─────────────────
-FROM node:24-slim AS deps
-WORKDIR /app
+ARG ONNX_VERSION=1.20.0
 
-RUN npm install -g pnpm@10.23.0 --no-update-notifier --quiet
+# ── Stage 1 : Build SvelteKit (adapter-static → server/build/) ──────────────
+FROM node:24-slim AS web-builder
+WORKDIR /workspace
+
+RUN npm install -g pnpm@10 --no-update-notifier --quiet
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
-# ── Stage 2 : Build SvelteKit + pré-téléchargement du modèle ─────────────────
-FROM deps AS builder
-COPY . .
+COPY svelte.config.js vite.config.mts tsconfig.json tsconfig.node.json ./
+COPY src ./src
+COPY static ./static
 
 RUN pnpm run build:web
+# Résultat dans server/build/ (lu par go:embed dans server/main.go)
 
-# Force le cache dans /hf-cache pour que le chemin soit prévisible.
-# @huggingface/transformers v3 lit env.cacheDir (API JS).
-# XDG_CACHE_HOME est relu dans embedder.ts au runtime.
-ENV XDG_CACHE_HOME=/hf-cache
+# ── Stage 2 : Build Go (CGO + onnxruntime) ───────────────────────────────────
+FROM golang:1.22-bookworm AS go-builder
+ARG ONNX_VERSION
+WORKDIR /workspace
 
-# Précharge les modèles d'embeddings (évite le téléchargement au runtime)
-COPY scripts/preload-model.mjs ./scripts/
-RUN node scripts/preload-model.mjs \
- && echo "Contenu du cache:" && ls -lh /hf-cache/models/ 2>/dev/null || echo "Cache créé"
+# Outils C requis par CGO (onnxruntime_go)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
 
-# ── Stage 3 : Runtime production (image allégée, sans devDeps) ───────────────
-FROM node:24-slim AS runtime
+# Téléchargement de libonnxruntime.so (version correspondant à yalue/onnxruntime_go)
+RUN curl -fsSL \
+    "https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-x64-${ONNX_VERSION}.tgz" \
+    -o /tmp/ort.tgz \
+    && tar -xzf /tmp/ort.tgz -C /tmp \
+    && cp /tmp/onnxruntime-linux-x64-${ONNX_VERSION}/lib/libonnxruntime.so.${ONNX_VERSION} \
+          /usr/local/lib/libonnxruntime.so \
+    && ldconfig \
+    && rm -rf /tmp/ort*
+
+# Cache des dépendances Go (layer dédié, invalidé seulement si go.mod change)
+COPY server/go.mod server/go.sum ./server/
+RUN cd server && go mod download
+
+# Code source Go + artefacts SvelteKit (go:embed server/build)
+COPY server ./server
+COPY --from=web-builder /workspace/server/build ./server/build
+
+# Téléchargement du modèle ONNX (intégré dans l'image, pas de volume requis)
+COPY scripts/download-model.sh ./scripts/download-model.sh
+RUN apt-get install -y --no-install-recommends bash \
+    && rm -rf /var/lib/apt/lists/* \
+    && bash scripts/download-model.sh models/multilingual-e5-small
+
+# Compilation du binaire (stripped pour réduire la taille)
+RUN cd server && CGO_ENABLED=1 go build -ldflags="-w -s" -o /ask-rules-server .
+
+# ── Stage 3 : Image de production minimale ───────────────────────────────────
+FROM debian:bookworm-slim AS runtime
+ARG ONNX_VERSION
 WORKDIR /app
 
-ENV NODE_ENV=production
-ENV PORT=3000
-# Même chemin de cache qu'au build → le modèle est trouvé sans téléchargement
-ENV XDG_CACHE_HOME=/hf-cache
+# Certificats SSL (requêtes HTTPS vers LLM APIs)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Variables d'environnement à fournir au lancement du conteneur :
-#   DATABASE_URL       — URL PostgreSQL (ex: postgres://user:pass@host:5432/db)
-#   MISTRAL_API_KEY    — Clé API Mistral (optionnel)
-#   OPENAI_API_KEY     — Clé API OpenAI  (optionnel)
-#   OLLAMA_MODEL       — Nom du modèle Ollama (optionnel)
-#   OLLAMA_HOST        — Adresse du serveur Ollama (optionnel)
+# Bibliothèque onnxruntime partagée (runtime CGO)
+COPY --from=go-builder /usr/local/lib/libonnxruntime.so /usr/local/lib/libonnxruntime.so
+RUN ldconfig
 
-RUN npm install -g pnpm@10.23.0 --no-update-notifier --quiet
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile --prod
+# Binaire Go (embarque déjà server/build/ via go:embed — pas besoin de Node.js)
+COPY --from=go-builder /ask-rules-server ./ask-rules-server
 
-# Artefacts du build SvelteKit
-COPY --from=builder /app/build ./build
+# Modèle ONNX téléchargé au build (intégré dans l'image)
+COPY --from=go-builder /workspace/models ./models
 
-# Modèle d'embedding pré-téléchargé (pas de connexion réseau requise au runtime)
-COPY --from=builder /hf-cache /hf-cache
+# uploads/ créé au démarrage si besoin (chemin configuré via UPLOADS_DIR)
+RUN mkdir -p uploads
 
-EXPOSE 3000
-CMD ["node", "build/index.js"]
+# ── Variables d'environnement ─────────────────────────────────────────────────
+# Obligatoires :
+#   DATABASE_URL     — ex: postgres://user:pass@host:5432/db
+# Optionnelles :
+#   MISTRAL_API_KEY  — LLM Mistral
+#   OPENAI_API_KEY   — LLM OpenAI
+#   OPENAI_MODEL     — défaut: gpt-4o-mini
+#   OLLAMA_HOST      — ex: http://ollama:11434
+#   OLLAMA_MODEL     — ex: llama3
+#   ADMIN_PASSWORD   — mot de passe admin (défaut: admin)
+#   REDIS_ENABLED    — true/false (défaut: false)
+#   REDIS_URL        — ex: redis://redis:6379
+ENV PORT=3001 \
+    MODEL_PATH=/app/models/multilingual-e5-small \
+    UPLOADS_DIR=/app/uploads
+
+EXPOSE 3001
+
+CMD ["/app/ask-rules-server"]

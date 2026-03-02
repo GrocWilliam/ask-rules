@@ -14,8 +14,8 @@
     const select = e.target as HTMLSelectElement;
     selectedGame = select.value;
     if (selectedGame) {
-      const game = data.games.find((g) => g.id === selectedGame);
-      if (game) gameNameValue = game.jeu;
+      const game = data.games.find((g: any) => g.id === selectedGame);
+      if (game) gameNameValue = game.name;
     }
   }
 
@@ -47,7 +47,7 @@
     const formData = new FormData(form);
 
     try {
-      const response = await fetch('/import/stream', {
+      const response = await fetch('/import', {
         method: 'POST',
         body: formData,
       });
@@ -148,7 +148,7 @@
         <select id="existingGame" class="game-select" disabled={isLoading} on:change={onGameSelect}>
           <option value="">— Nouveau jeu —</option>
           {#each data.games as g}
-            <option value={g.id}>{g.jeu}</option>
+            <option value={g.id}>{(g as any).name}</option>
           {/each}
         </select>
       </div>

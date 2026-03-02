@@ -1,0 +1,7 @@
+// admin/+page.ts — Redirection vers /admin/games
+import type { PageLoad } from './$types';
+import { redirect } from '@sveltejs/kit';
+
+export const load: PageLoad = async () => {
+  throw redirect(302, '/admin/games');
+};

@@ -6,7 +6,7 @@
     'Posez des questions sur vos jeux de société préférés et obtenez des réponses instantanées grâce à notre IA spécialisée dans les règles de jeux.';
   export let keywords =
     'jeux de société, règles de jeu, IA, assistant intelligent, board games, NLP, questions réponses';
-  export let image = '/og-image.jpg';
+  export let image = '/og-image.svg';
   export let type = 'website';
 
   $: url = $page.url.href;
