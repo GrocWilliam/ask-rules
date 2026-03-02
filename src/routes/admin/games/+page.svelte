@@ -10,6 +10,17 @@
   let confirmDelete: string | null = null;
   let reprocessingGame: string | null = null;
 
+  // ── Reprocess One ──────────────────────────────────────────────────────────
+  type StepEntry = { msg: string; status: 'running' | 'done' | 'error' };
+
+  let reprocessOneActive = false;
+  let reprocessOneDone = false;
+  let reprocessOneGameName = '';
+  let reprocessOneLog: string[] = [];
+  let reprocessOneSteps: StepEntry[] = [];
+  let reprocessOneEmbedding: { current: number; total: number } | null = null;
+  let reprocessOneError: string | null = null;
+
   // ── Reprocess All ──────────────────────────────────────────────────────────
   type GameProgress = {
     name: string;
@@ -159,25 +170,96 @@
     }
   }
 
-  async function reprocessGame(gameId: string) {
+  async function reprocessGame(gameId: string, gameName: string) {
     reprocessingGame = gameId;
+    reprocessOneActive = true;
+    reprocessOneDone = false;
+    reprocessOneGameName = gameName;
+    reprocessOneLog = [];
+    reprocessOneSteps = [];
+    reprocessOneEmbedding = null;
+    reprocessOneError = null;
+    actionMsg = null;
+
     try {
       const res = await fetch('/api/admin/reprocess', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game_id: gameId }),
+        body: JSON.stringify({ id: gameId }),
       });
-      if (res.ok) {
-        actionMsg = { ok: true, msg: 'Recalcul lancé' };
-        await invalidateAll();
-      } else {
-        const d = await res.json().catch(() => ({}));
-        actionMsg = { ok: false, msg: d.error ?? 'Erreur recalcul' };
+
+      if (!res.body) throw new Error('Pas de stream SSE');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      // Marquer le dernier step comme done quand un nouveau step arrive
+      const pushStep = (msg: string) => {
+        reprocessOneSteps = reprocessOneSteps.map((s, i) =>
+          i === reprocessOneSteps.length - 1 && s.status === 'running'
+            ? { ...s, status: 'done' as const }
+            : s
+        );
+        reprocessOneSteps = [...reprocessOneSteps, { msg, status: 'running' }];
+        reprocessOneLog = [...reprocessOneLog, `· ${msg}`];
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let evt: Record<string, unknown>;
+          try {
+            evt = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+
+          const t = evt.type as string;
+
+          if (t === 'step') {
+            pushStep(evt.message as string);
+          } else if (t === 'embedding_start') {
+            reprocessOneEmbedding = { current: 0, total: evt.total as number };
+            reprocessOneLog = [...reprocessOneLog, `↳ Embeddings : 0/${evt.total}`];
+          } else if (t === 'embedding_progress') {
+            reprocessOneEmbedding = { current: evt.current as number, total: evt.total as number };
+          } else if (t === 'complete') {
+            reprocessOneSteps = reprocessOneSteps.map((s, i) =>
+              i === reprocessOneSteps.length - 1 && s.status === 'running'
+                ? { ...s, status: 'done' as const }
+                : s
+            );
+            reprocessOneEmbedding = null;
+            reprocessOneDone = true;
+            reprocessOneLog = [...reprocessOneLog, `✅ Terminé`];
+            await invalidateAll();
+          } else if (t === 'error') {
+            const msg = evt.error as string;
+            reprocessOneError = msg;
+            reprocessOneSteps = reprocessOneSteps.map((s, i) =>
+              i === reprocessOneSteps.length - 1 && s.status === 'running'
+                ? { ...s, status: 'error' as const }
+                : s
+            );
+            reprocessOneDone = true;
+            reprocessOneLog = [...reprocessOneLog, `❌ ${msg}`];
+          }
+        }
       }
-    } catch {
-      actionMsg = { ok: false, msg: 'Erreur réseau' };
+    } catch (e: any) {
+      reprocessOneError = e.message;
+      reprocessOneDone = true;
+      reprocessOneLog = [...reprocessOneLog, `❌ Erreur réseau: ${e.message}`];
     } finally {
       reprocessingGame = null;
+      reprocessOneActive = false;
     }
   }
 </script>
@@ -210,6 +292,68 @@
 {/if}
 {#if actionMsg && !actionMsg.ok}
   <div class="alert alert-error">❌ {actionMsg.msg}</div>
+{/if}
+
+{#if reprocessOneActive || reprocessOneDone}
+  <div class="reprocess-panel reprocess-one-panel">
+    <div class="reprocess-header">
+      <h3>🔄 Recalcul — <em>{reprocessOneGameName}</em></h3>
+      {#if reprocessOneDone}
+        <button
+          class="btn-close"
+          on:click={() => {
+            reprocessOneDone = false;
+            reprocessOneLog = [];
+            reprocessOneSteps = [];
+          }}>✕</button
+        >
+      {/if}
+    </div>
+
+    {#if reprocessOneSteps.length > 0}
+      <div class="one-steps">
+        {#each reprocessOneSteps as step}
+          <div class="one-step one-step-{step.status}">
+            {#if step.status === 'running'}
+              <span class="spinner-small"></span>
+            {:else if step.status === 'done'}
+              ✅
+            {:else}
+              ❌
+            {/if}
+            {step.msg}
+          </div>
+        {/each}
+      </div>
+    {/if}
+
+    {#if reprocessOneEmbedding && !reprocessOneDone}
+      <div class="one-embed">
+        Embeddings {reprocessOneEmbedding.current} / {reprocessOneEmbedding.total}
+        <div class="reprocess-progress-bar-wrap" style="margin-top:0.4rem">
+          <div
+            class="reprocess-progress-bar embed-color"
+            style="width: {Math.round(
+              (reprocessOneEmbedding.current / reprocessOneEmbedding.total) * 100
+            )}%"
+          ></div>
+        </div>
+      </div>
+    {/if}
+
+    {#if reprocessOneError}
+      <div class="one-error">❌ {reprocessOneError}</div>
+    {/if}
+
+    {#if reprocessOneDone && !reprocessOneError}
+      <div class="one-success">✅ Recalcul terminé avec succès</div>
+    {/if}
+
+    <details class="reprocess-log">
+      <summary>Journal ({reprocessOneLog.length} entrées)</summary>
+      <pre>{reprocessOneLog.join('\n')}</pre>
+    </details>
+  </div>
 {/if}
 
 {#if reprocessAllActive || reprocessAllDone}
@@ -336,7 +480,7 @@
       <div class="game-actions">
         <button
           class="btn btn-secondary-outline"
-          on:click={() => reprocessGame(game.id)}
+          on:click={() => reprocessGame(game.id, game.name)}
           disabled={reprocessingGame === game.id}
           title="Recalculer les embeddings avec le modèle actuel"
         >
@@ -791,6 +935,62 @@
     color: #9399b2;
     font-size: 0.8rem;
     user-select: none;
+  }
+
+  /* ── Panneau Reprocess One ─────────────────────────────────────────── */
+  .reprocess-one-panel {
+    border-left: 4px solid #89b4fa;
+  }
+
+  .one-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .one-step {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+  }
+
+  .one-step-running {
+    color: #cba6f7;
+    background: #313244;
+  }
+
+  .one-step-done {
+    color: #a6e3a1;
+  }
+
+  .one-step-error {
+    color: #f38ba8;
+  }
+
+  .one-embed {
+    color: #89dceb;
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .embed-color {
+    background: #89b4fa;
+  }
+
+  .one-error {
+    color: #f38ba8;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .one-success {
+    color: #a6e3a1;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
   }
 
   .reprocess-log pre {
