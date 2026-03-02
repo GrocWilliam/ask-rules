@@ -3,6 +3,7 @@ package retriever
 
 import (
 	"context"
+	"log"
 	"sort"
 	"strings"
 
@@ -13,10 +14,10 @@ import (
 )
 
 const (
-	vectorWeight  = 0.65
-	textWeight    = 0.35
-	defaultLimit  = 6
-	minScore      = 0.1
+	vectorWeight = 0.65
+	textWeight   = 0.35
+	defaultLimit = 4
+	minScore     = 0.50 // seuil de pertinence : seules les sections à ≥ 50% sont retenues
 )
 
 // SearchOptions paramètres de recherche.
@@ -45,16 +46,22 @@ func Search(ctx context.Context, opts SearchOptions) ([]models.ScoredSection, er
 			f64vec[i] = float64(f)
 		}
 		vr, err := db.VectorSearch(ctx, opts.GameID, f64vec, limit*2)
-		if err == nil {
+		if err != nil {
+			log.Printf("[retriever] VectorSearch: %v", err)
+		} else {
 			vectorResults = vr
 		}
+	} else if embErr != nil {
+		log.Printf("[retriever] Embed: %v", embErr)
 	}
 
-	// Recherche plein texte
+	// Recherche plein texte (OR sur les mots-clés)
 	keywords := buildSearchQuery(opts.Question)
 	if keywords != "" {
 		tr, err := db.FullTextSearch(ctx, opts.GameID, keywords, limit*2)
-		if err == nil {
+		if err != nil {
+			log.Printf("[retriever] FullTextSearch: %v", err)
+		} else {
 			textResults = tr
 		}
 	}
@@ -63,17 +70,39 @@ func Search(ctx context.Context, opts SearchOptions) ([]models.ScoredSection, er
 	return merged, nil
 }
 
-// buildSearchQuery construit une requête texte depuis les mots-clés.
+// buildSearchQuery construit une requête to_tsquery avec OR (|) pour être permissif.
+// Chaque mot-clé est séparé par " | " : une section est retournée dès qu'elle
+// contient AU MOINS UN des mots-clés (classement par ts_rank ensuite).
 func buildSearchQuery(question string) string {
 	keywords := nlp.ExtractKeywords(question)
 	if len(keywords) == 0 {
+		// Fallback : tous les mots de la question (plainto_tsquery tolère n'importe quoi)
 		return question
 	}
-	// Prendre les 5 premiers mots-clés
-	if len(keywords) > 5 {
-		keywords = keywords[:5]
+	// Prendre les 8 premiers mots-clés
+	if len(keywords) > 8 {
+		keywords = keywords[:8]
 	}
-	return strings.Join(keywords, " & ")
+	// Échapper les caractères spéciaux pour to_tsquery
+	for i, k := range keywords {
+		keywords[i] = strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+				return r
+			}
+			return -1 // supprimer tout caractère non alphanumérique
+		}, k)
+	}
+	// Filtrer les mots vides après nettoyage
+	var clean []string
+	for _, k := range keywords {
+		if len(k) >= 2 {
+			clean = append(clean, k)
+		}
+	}
+	if len(clean) == 0 {
+		return question
+	}
+	return strings.Join(clean, " | ")
 }
 
 // mergeResults fusionne les résultats vectoriels et textuels avec pondération.

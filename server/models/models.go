@@ -8,13 +8,13 @@ import "time"
 // Game correspond à la table `games`.
 // Les colonnes PG sont en snake_case ; on utilise des tags JSON pour l'API.
 type Game struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`        // colonne: jeu
-	FilePath    string                 `json:"file_path"`   // colonne: fichier
-	AddedAt     time.Time              `json:"added_at"`    // colonne: date_ajout
-	Metadata    map[string]interface{} `json:"metadata"`
-	Stats       map[string]interface{} `json:"stats"`       // colonne: statistiques
-	Gameplay    map[string]interface{} `json:"gameplay"`
+	ID       string                 `json:"id"`
+	Name     string                 `json:"name"`      // colonne: jeu
+	FilePath string                 `json:"file_path"` // colonne: fichier
+	AddedAt  time.Time              `json:"added_at"`  // colonne: date_ajout
+	Metadata map[string]interface{} `json:"metadata"`
+	Stats    map[string]interface{} `json:"stats"` // colonne: statistiques
+	Gameplay map[string]interface{} `json:"gameplay"`
 }
 
 type GameWithStats struct {
@@ -28,18 +28,15 @@ type GameWithStats struct {
 type Section struct {
 	ID            string    `json:"id"`
 	GameID        string    `json:"game_id"`
-	Title         string    `json:"title"`         // colonne: titre
-	Level         int       `json:"level"`         // colonne: niveau
-	SectionType   string    `json:"section_type"`  // colonne: type_section
-	Text          string    `json:"text"`          // colonne: contenu
-	Entities      []string  `json:"entities"`      // colonne: entites
-	Actions       []string  `json:"actions"`
-	Summary       string    `json:"summary"`       // colonne: resume
-	Mechanics     []string  `json:"mechanics"`     // colonne: mecaniques
+	Title         string    `json:"title"`        // colonne: titre
+	SectionType   string    `json:"section_type"` // colonne: type_section
+	Text          string    `json:"text"`         // colonne: contenu
+	Summary       string    `json:"summary"`      // colonne: resume
+	Mechanics     []string  `json:"mechanics"`    // colonne: mecaniques — inclus dans search_vector (poids B)
 	Embedding     []float64 `json:"embedding,omitempty"`
 	PageStart     *int      `json:"page_start,omitempty"` // colonne: page_debut
 	PageEnd       *int      `json:"page_end,omitempty"`   // colonne: page_fin
-	HierarchyPath string    `json:"hierarchy_path"`
+	HierarchyPath string    `json:"hierarchy_path"`       // colonne: hierarchy_path — type de section pour FTS (poids B)
 	ChunkIndex    int       `json:"chunk_index"`
 	TotalChunks   int       `json:"total_chunks"`
 }
@@ -82,15 +79,15 @@ type AskRequest struct {
 }
 
 type AskResponse struct {
-	OK      bool            `json:"ok"`
-	Jeu     string          `json:"jeu,omitempty"`
-	JeuID   string          `json:"jeu_id,omitempty"`
-	Answer  string          `json:"answer,omitempty"`
-	UsedLLM bool            `json:"used_llm,omitempty"`
-	Model   string          `json:"model,omitempty"`
+	OK       bool            `json:"ok"`
+	Jeu      string          `json:"jeu,omitempty"`
+	JeuID    string          `json:"jeu_id,omitempty"`
+	Answer   string          `json:"answer,omitempty"`
+	UsedLLM  bool            `json:"used_llm,omitempty"`
+	Model    string          `json:"model,omitempty"`
 	Sections []SectionResult `json:"sections,omitempty"`
-	Cached  bool            `json:"cached,omitempty"`
-	Error   string          `json:"error,omitempty"`
+	Cached   bool            `json:"cached,omitempty"`
+	Error    string          `json:"error,omitempty"`
 }
 
 type SectionResult struct {

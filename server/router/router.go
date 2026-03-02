@@ -36,6 +36,8 @@ func New(staticFS embed.FS) http.Handler {
 		r.Post("/api/ask", handlers.Ask)
 	})
 
+	r.Post("/api/import", handlers.ImportSSE)
+
 	r.Get("/api/games", handlers.ListGames)
 	r.Get("/api/games/{id}", handlers.GetGame)
 
@@ -58,8 +60,7 @@ func New(staticFS embed.FS) http.Handler {
 		r.Get("/api/admin/files", handlers.ListFiles)
 		r.Delete("/api/admin/files/{slug}/{filename}", handlers.DeleteFile)
 
-		// Import + reprocess
-		r.Post("/api/import", handlers.ImportSSE)
+		// Reprocess
 		r.Post("/api/admin/reprocess", handlers.ReprocessGame)
 		r.Post("/api/admin/reprocess-all", handlers.ReprocessAll)
 	})

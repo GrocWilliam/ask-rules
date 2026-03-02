@@ -42,57 +42,57 @@ func Error(ctx context.Context, eventType, message string, details map[string]in
 // GameAdded journal l'ajout d'un jeu.
 func GameAdded(ctx context.Context, gameName string, fileCount int) {
 	Info(ctx, "game_added", fmt.Sprintf("Jeu ajouté : %s", gameName), map[string]interface{}{
-"game": gameName, "file_count": fileCount,
-})
+		"game": gameName, "file_count": fileCount,
+	})
 }
 
 // GameDeleted journal la suppression d'un jeu.
 func GameDeleted(ctx context.Context, gameName string) {
-Info(ctx, "game_deleted", fmt.Sprintf("Jeu supprimé : %s", gameName), map[string]interface{}{
-"game": gameName,
-})
+	Info(ctx, "game_deleted", fmt.Sprintf("Jeu supprimé : %s", gameName), map[string]interface{}{
+		"game": gameName,
+	})
 }
 
 // GameReprocessed journal le retraitement d'un jeu.
 func GameReprocessed(ctx context.Context, gameName string) {
 	Info(ctx, "game_reprocessed", fmt.Sprintf("Jeu retraité : %s", gameName), map[string]interface{}{
-"game": gameName,
-})
+		"game": gameName,
+	})
 }
 
 // ImportError journal une erreur d'import.
 func ImportError(ctx context.Context, gameName, errMsg string) {
-Error(ctx, "import_error", fmt.Sprintf("Erreur import %s : %s", gameName, errMsg), map[string]interface{}{
-"game": gameName, "error": errMsg,
-})
+	Error(ctx, "import_error", fmt.Sprintf("Erreur import %s : %s", gameName, errMsg), map[string]interface{}{
+		"game": gameName, "error": errMsg,
+	})
 }
 
 // LLMQuery journal une requête LLM avec la question et la réponse anonymisées.
 func LLMQuery(ctx context.Context, question, answer, jeu, model string, tokens *models.TokenUsage, durationMs int64) {
-q := []rune(question)
-if len(q) > 300 {
-q = q[:300]
-}
-a := []rune(answer)
-if len(a) > 600 {
-a = a[:600]
-}
-details := map[string]interface{}{
-"question":    string(q),
-"answer":      string(a),
-"jeu":         jeu,
-"model":       model,
-"duration_ms": durationMs,
-}
-if tokens != nil {
-details["tokens_prompt"] = tokens.Prompt
-details["tokens_completion"] = tokens.Completion
-details["tokens_total"] = tokens.Total
-}
-Info(ctx, "llm_query", fmt.Sprintf("Question sur %s (%dms)", jeu, durationMs), details)
+	q := []rune(question)
+	if len(q) > 300 {
+		q = q[:300]
+	}
+	a := []rune(answer)
+	if len(a) > 600 {
+		a = a[:600]
+	}
+	details := map[string]interface{}{
+		"question":    string(q),
+		"answer":      string(a),
+		"jeu":         jeu,
+		"model":       model,
+		"duration_ms": durationMs,
+	}
+	if tokens != nil {
+		details["tokens_prompt"] = tokens.Prompt
+		details["tokens_completion"] = tokens.Completion
+		details["tokens_total"] = tokens.Total
+	}
+	Info(ctx, "llm_query", fmt.Sprintf("Question sur %s (%dms)", jeu, durationMs), details)
 }
 
 // CacheHit journal un cache hit.
 func CacheHit(ctx context.Context, jeu string) {
-Info(ctx, "cache_hit", fmt.Sprintf("Cache hit pour %s", jeu), map[string]interface{}{"jeu": jeu})
+	Info(ctx, "cache_hit", fmt.Sprintf("Cache hit pour %s", jeu), map[string]interface{}{"jeu": jeu})
 }

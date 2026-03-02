@@ -37,19 +37,19 @@ var (
 	ortMu sync.Mutex
 
 	// vocab : token → ID (position dans le tableau Unigram)
-	vocab       map[string]int32
+	vocab map[string]int32
 	// vocabScores : token → log-probabilité (pour Viterbi Unigram)
 	vocabScores map[string]float64
-	unkID int32 = 3 // <unk> dans multilingual-e5-small
-	clsID int32 = 0 // <s>
-	sepID int32 = 2 // </s>
+	unkID       int32 = 3 // <unk> dans multilingual-e5-small
+	clsID       int32 = 0 // <s>
+	sepID       int32 = 2 // </s>
 
 	session *ort.AdvancedSession
 
 	// Tensors pré-alloués (réutilisés à chaque inférence)
-	inIDs     *ort.Tensor[int32]
-	inMask    *ort.Tensor[int32]
-	inTypes   *ort.Tensor[int32]
+	inIDs     *ort.Tensor[int64]
+	inMask    *ort.Tensor[int64]
+	inTypes   *ort.Tensor[int64]
 	outTensor *ort.Tensor[float32]
 
 	initialized bool
@@ -108,17 +108,17 @@ func Init() error {
 		outputNames := []string{"last_hidden_state"}
 
 		// Tensors pré-alloués — réutilisés à chaque Run()
-		inIDs, err = ort.NewEmptyTensor[int32](ort.NewShape(1, MaxTokens))
+		inIDs, err = ort.NewEmptyTensor[int64](ort.NewShape(1, MaxTokens))
 		if err != nil {
 			persistErr = fmt.Errorf("tensor input_ids : %w", err)
 			return
 		}
-		inMask, err = ort.NewEmptyTensor[int32](ort.NewShape(1, MaxTokens))
+		inMask, err = ort.NewEmptyTensor[int64](ort.NewShape(1, MaxTokens))
 		if err != nil {
 			persistErr = fmt.Errorf("tensor attention_mask : %w", err)
 			return
 		}
-		inTypes, err = ort.NewEmptyTensor[int32](ort.NewShape(1, MaxTokens))
+		inTypes, err = ort.NewEmptyTensor[int64](ort.NewShape(1, MaxTokens))
 		if err != nil {
 			persistErr = fmt.Errorf("tensor token_type_ids : %w", err)
 			return
@@ -188,24 +188,29 @@ func Embed(_ context.Context, text string) ([]float32, error) {
 
 // tokenize tokenise `text` avec le tokenizer Unigram SentencePiece.
 // Le modèle E5 attend un préfixe "query: " pour les requêtes.
-func tokenize(text string) (inputIDs, attentionMask, tokenTypeIDs []int32) {
-	inputIDs = make([]int32, MaxTokens)
-	attentionMask = make([]int32, MaxTokens)
-	tokenTypeIDs = make([]int32, MaxTokens)
+func tokenize(text string) (inputIDs, attentionMask, tokenTypeIDs []int64) {
+	inputIDs = make([]int64, MaxTokens)
+	attentionMask = make([]int64, MaxTokens)
+	tokenTypeIDs = make([]int64, MaxTokens)
 
 	// Préfixe E5 pour les requêtes
 	prefixed := "query: " + text
 
-	tokens := []int32{clsID}
-	tokens = append(tokens, unigramEncode(prefixed)...)
-
-	// Troncature + SEP
-	if len(tokens) >= MaxTokens-1 {
-		tokens = tokens[:MaxTokens-1]
+	tokens := unigramEncode(prefixed)
+	// CLS + tokens + SEP
+	all := make([]int64, 0, len(tokens)+2)
+	all = append(all, int64(clsID))
+	for _, t := range tokens {
+		all = append(all, int64(t))
 	}
-	tokens = append(tokens, sepID)
 
-	for i, t := range tokens {
+	// Troncature
+	if len(all) >= MaxTokens-1 {
+		all = all[:MaxTokens-1]
+	}
+	all = append(all, int64(sepID))
+
+	for i, t := range all {
 		inputIDs[i] = t
 		attentionMask[i] = 1
 	}
@@ -279,7 +284,7 @@ func unigramViterbi(text string) []int32 {
 
 // ── Mean pooling + normalisation L2 ─────────────────────────────────────────
 
-func meanPoolAndNormalize(hidden []float32, mask []int32) []float32 {
+func meanPoolAndNormalize(hidden []float32, mask []int64) []float32 {
 	result := make([]float32, Dims)
 	count := 0
 	for t := 0; t < MaxTokens; t++ {
@@ -391,7 +396,6 @@ func findOrtLib() string {
 	}
 	return "libonnxruntime.so"
 }
-
 
 // preTokenize découpe le texte en mots et encode chaque mot en BPE unicode.
 // L'espace précédant un mot (sauf le premier) devient le caractère Ġ (U+0120).

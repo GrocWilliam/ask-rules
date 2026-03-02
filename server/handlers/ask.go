@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	appctx "ask-rules-server/context"
 	"ask-rules-server/cache"
+	appctx "ask-rules-server/context"
 	"ask-rules-server/db"
 	"ask-rules-server/llm"
 	"ask-rules-server/logger"
@@ -64,7 +64,7 @@ func Ask(w http.ResponseWriter, r *http.Request) {
 	sections, err := retriever.Search(ctx, retriever.SearchOptions{
 		GameID:   game.ID,
 		Question: req.Question,
-		Limit:    6,
+		Limit:    4,
 	})
 	if err != nil || len(sections) == 0 {
 		resp := models.AskResponse{

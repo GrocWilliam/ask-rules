@@ -51,6 +51,25 @@ func Run(ctx context.Context, opts ImportOptions) error {
 		allChunkTexts = append(allChunkTexts, chunkTexts...)
 	}
 
+	// ── Extraction des métadonnées du jeu ─────────────────────────────────────
+	if len(allChunkTexts) > 0 {
+		// Chercher dans les 5 premiers chunks (couverture, matériel)
+		sampleSize := 5
+		if len(allChunkTexts) < sampleSize {
+			sampleSize = len(allChunkTexts)
+		}
+		gameMeta := nlp.ExtractGameMeta(allChunkTexts[:sampleSize])
+		if len(gameMeta) > 0 {
+			if game.Metadata == nil {
+				game.Metadata = map[string]interface{}{}
+			}
+			for k, v := range gameMeta {
+				game.Metadata[k] = v
+			}
+			_ = db.UpsertGame(ctx, game)
+		}
+	}
+
 	// ── Extraction du gameplay ─────────────────────────────────────────────
 	emit("gameplay", map[string]interface{}{"status": "extracting", "chunks": len(allChunkTexts)})
 
@@ -105,42 +124,45 @@ func processFile(ctx context.Context, game *models.Game, fp string, emit func(st
 		}
 
 		// Embedding
-		vec, embErr := embedder.Embed(ctx, chunk.Text)
+		// Nettoyer les séquences UTF-8 invalides (pdftotext peut en produire)
+		cleanText := sanitizeUTF8(chunk.Text)
+
+		// Ignorer les chunks de mauvaise qualité (tables des matières, scores, artefacts PDF)
+		if IsLowQualityText(cleanText) {
+			continue
+		}
+
+		vec, embErr := embedder.Embed(ctx, cleanText)
 		if embErr != nil {
-			// Continuer sans embedding
+			emit("section_error", map[string]interface{}{"index": i, "error": "embedding: " + embErr.Error()})
 			vec = nil
 		}
 
 		// NLP
-		sectionType := nlp.DetectSectionType("", chunk.Text)
-		mechanics := nlp.DetectMechanics(chunk.Text)
-		keywords := nlp.ExtractKeywords(chunk.Text)
-		_ = keywords // stocké dans metadata de la section
+		sectionType := nlp.DetectSectionType("", cleanText)
+		mechanics := nlp.DetectMechanics(cleanText)
 
 		section := models.Section{
-			ID:          newUUID(),
-			GameID:      game.ID,
-			Title:       fmt.Sprintf("Extrait %d", i+1),
-			Level:       1,
-			SectionType: sectionType,
-			Text:        chunk.Text,
-			Entities:    []string{},
-			Actions:     []string{},
-			Summary:     chunk.Text[:min(160, len(chunk.Text))],
-			Mechanics:   mechanics,
-			Embedding:   vecToFloat64(vec),
-			PageStart:   intPtr(chunk.PageStart),
-			PageEnd:     intPtr(chunk.PageEnd),
-			HierarchyPath: fp,
-			ChunkIndex:  i,
-			TotalChunks: len(chunks),
+			ID:            newUUID(),
+			GameID:        game.ID,
+			Title:         generateTitle(sectionType, cleanText, i),
+			SectionType:   sectionType,
+			Text:          cleanText,
+			Summary:       extractFirstSentence(cleanText, 220),
+			Mechanics:     mechanics,
+			Embedding:     vecToFloat64(vec),
+			PageStart:     intPtr(chunk.PageStart),
+			PageEnd:       intPtr(chunk.PageEnd),
+			HierarchyPath: sectionType, // type de section comme chemin hiérarchique pour le FTS
+			ChunkIndex:    i,
+			TotalChunks:   len(chunks),
 		}
 
 		if err := db.InsertSection(ctx, section); err != nil {
 			emit("section_error", map[string]interface{}{"index": i, "error": err.Error()})
 		} else {
 			*total++
-			chunkTexts = append(chunkTexts, chunk.Text)
+			chunkTexts = append(chunkTexts, cleanText)
 		}
 
 		if i%10 == 0 {
@@ -187,4 +209,107 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// sanitizeUTF8 supprime les séquences d'octets invalides en UTF-8.
+func sanitizeUTF8(s string) string {
+	return strings.ToValidUTF8(s, "")
+}
+
+// generateTitle crée un titre lisible pour un chunk à partir de :
+//  1. Le type de section détecté (label FR)
+//  2. Les premiers mots significatifs du texte (première phrase tronquée)
+func generateTitle(sectionType, text string, index int) string {
+	sectionLabels := map[string]string{
+		"setup":     "Mise en place",
+		"turn":      "Tour de jeu",
+		"scoring":   "Score & Victoire",
+		"end":       "Fin de partie",
+		"component": "Composants",
+		"special":   "Règle spéciale",
+		"example":   "Exemple",
+	}
+
+	// Extraire la première ligne non vide significative (titre de section dans le PDF)
+	firstLine := ""
+	for _, line := range strings.SplitN(text, "\n", 10) {
+		line = strings.TrimSpace(line)
+		runes := []rune(line)
+		// Ligne courte (≤ 80 car.) non purement numérique → probablement un titre de section
+		if len(runes) >= 4 && len(runes) <= 80 {
+			allDigitsOrPunct := true
+			letterCount := 0
+			for _, r := range runes {
+				if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r > 127 {
+					allDigitsOrPunct = false
+					letterCount++
+				}
+			}
+			if !allDigitsOrPunct && letterCount >= 3 {
+				firstLine = line
+				break
+			}
+		}
+	}
+
+	typeLabel, hasType := sectionLabels[sectionType]
+
+	if firstLine != "" {
+		// Tronquer si trop long
+		runes := []rune(firstLine)
+		if len(runes) > 60 {
+			firstLine = string(runes[:60]) + "…"
+		}
+		if hasType && sectionType != "general" {
+			return typeLabel + " — " + firstLine
+		}
+		return firstLine
+	}
+
+	// Fallback : label du type seul
+	if hasType && sectionType != "general" {
+		return fmt.Sprintf("%s %d", typeLabel, index+1)
+	}
+	return fmt.Sprintf("Règles %d", index+1)
+}
+
+// truncateRunes tronque s à maxRunes caractères Unicode (pas bytes).
+func truncateRunes(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes])
+}
+
+// extractFirstSentence retourne la première phrase complète du texte (terminée par
+// '.', '!', '?' ou un saut de ligne double), tronquée à maxRunes si nécessaire.
+// Le résultat est donc factuellement distinct du contenu complet.
+func extractFirstSentence(s string, maxRunes int) string {
+	s = strings.TrimSpace(s)
+	// Cherche la fin de la première phrase
+	for i, r := range s {
+		if r == '.' || r == '!' || r == '?' {
+			sentence := strings.TrimSpace(s[:i+1])
+			return truncateRunes(sentence, maxRunes)
+		}
+		// Paragraphe double-saut de ligne
+		if i > 0 && strings.HasPrefix(s[i:], "\n\n") {
+			sentence := strings.TrimSpace(s[:i])
+			if sentence != "" {
+				return truncateRunes(sentence, maxRunes)
+			}
+		}
+	}
+	// Pas de ponctuation trouvée → troncature propre au dernier espace
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	cut := string(runes[:maxRunes])
+	// Remonte au dernier espace pour ne pas couper un mot
+	if idx := strings.LastIndexByte(cut, ' '); idx > maxRunes/2 {
+		cut = cut[:idx]
+	}
+	return strings.TrimSpace(cut) + "…"
 }
