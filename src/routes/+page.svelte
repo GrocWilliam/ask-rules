@@ -340,7 +340,7 @@
           : ''}</span
       >
     {/if}
-    <span class="version">v{(data as any).version ?? '1.0.0'}</span>
+    <span class="version">v{__APP_VERSION__}</span>
   </footer>
 </div>
 
