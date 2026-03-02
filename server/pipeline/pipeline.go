@@ -3,6 +3,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -38,10 +39,36 @@ func Run(ctx context.Context, opts ImportOptions) error {
 	}
 
 	totalChunks := 0
+	// Accumuler tous les textes pour l'extraction de gameplay
+	var allChunkTexts []string
+
 	for _, fp := range opts.FilePaths {
-		if err := processFile(ctx, game, fp, emit, &totalChunks); err != nil {
-			emit("file_error", map[string]interface{}{"file": fp, "error": err.Error()})
+		chunkTexts, fileErr := processFile(ctx, game, fp, emit, &totalChunks)
+		if fileErr != nil {
+			emit("file_error", map[string]interface{}{"file": fp, "error": fileErr.Error()})
 			// continuer avec les autres fichiers
+		}
+		allChunkTexts = append(allChunkTexts, chunkTexts...)
+	}
+
+	// ── Extraction du gameplay ─────────────────────────────────────────────
+	emit("gameplay", map[string]interface{}{"status": "extracting", "chunks": len(allChunkTexts)})
+
+	gameplayData := nlp.ExtractGameplay(allChunkTexts)
+	if !gameplayData.IsEmpty() {
+		if gMap := gameplayDataToMap(gameplayData); gMap != nil {
+			if saveErr := db.UpdateGameplay(ctx, game.ID, gMap); saveErr != nil {
+				emit("gameplay_error", map[string]interface{}{"error": saveErr.Error()})
+			} else {
+				emit("gameplay", map[string]interface{}{
+					"status":    "done",
+					"mechanics": len(gameplayData.Mechanics),
+					"phases":    len(gameplayData.Phases),
+					"has_setup": gameplayData.Setup != nil,
+					"has_turns": gameplayData.Turns != nil,
+					"has_end":   gameplayData.EndGame != nil,
+				})
+			}
 		}
 	}
 
@@ -52,16 +79,16 @@ func Run(ctx context.Context, opts ImportOptions) error {
 	return nil
 }
 
-func processFile(ctx context.Context, game *models.Game, fp string, emit func(string, map[string]interface{}), total *int) error {
+func processFile(ctx context.Context, game *models.Game, fp string, emit func(string, map[string]interface{}), total *int) ([]string, error) {
 	absPath := storage.GetAbsolutePath(fp)
 
 	emit("extracting", map[string]interface{}{"file": fp})
 	text, pages, err := ExtractText(absPath)
 	if err != nil {
-		return fmt.Errorf("extraction: %w", err)
+		return nil, fmt.Errorf("extraction: %w", err)
 	}
 	if strings.TrimSpace(text) == "" {
-		return fmt.Errorf("fichier vide: %s", fp)
+		return nil, fmt.Errorf("fichier vide: %s", fp)
 	}
 
 	emit("chunking", map[string]interface{}{"file": fp, "text_length": len(text)})
@@ -69,10 +96,11 @@ func processFile(ctx context.Context, game *models.Game, fp string, emit func(st
 
 	emit("embedding", map[string]interface{}{"file": fp, "chunks": len(chunks)})
 
+	var chunkTexts []string
 	for i, chunk := range chunks {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return chunkTexts, ctx.Err()
 		default:
 		}
 
@@ -112,6 +140,7 @@ func processFile(ctx context.Context, game *models.Game, fp string, emit func(st
 			emit("section_error", map[string]interface{}{"index": i, "error": err.Error()})
 		} else {
 			*total++
+			chunkTexts = append(chunkTexts, chunk.Text)
 		}
 
 		if i%10 == 0 {
@@ -119,7 +148,18 @@ func processFile(ctx context.Context, game *models.Game, fp string, emit func(st
 		}
 	}
 
-	return nil
+	return chunkTexts, nil
+}
+
+// gameplayDataToMap convertit GameplayData en map[string]interface{} via JSON
+func gameplayDataToMap(gd *nlp.GameplayData) map[string]interface{} {
+	b, err := json.Marshal(gd)
+	if err != nil {
+		return nil
+	}
+	var m map[string]interface{}
+	_ = json.Unmarshal(b, &m)
+	return m
 }
 
 func vecToFloat64(v []float32) []float64 {
