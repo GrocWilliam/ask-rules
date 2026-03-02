@@ -47,11 +47,11 @@ func main() {
 	}
 	handler := router.New(staticFS)
 	srv := &http.Server{
-		Addr:         ":" + config.C.Port,
-		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:              ":" + config.C.Port,
+		Handler:           handler,
+		ReadHeaderTimeout: 30 * time.Second, // timeout uniquement sur les en-têtes (pas le corps SSE)
+		WriteTimeout:      0,                // désactivé : les réponses SSE peuvent durer plusieurs minutes
+		IdleTimeout:       120 * time.Second,
 	}
 	go func() {
 		fmt.Printf("🚀 Serveur sur http://localhost:%s\n", config.C.Port)

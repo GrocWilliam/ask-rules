@@ -4,7 +4,8 @@
   "description": "PoC - Analyse de règles de jeu de société en français avec NLP",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "vite dev",
+    "dev:front": "vite dev",
+    "dev:back": "cd server && air",
     "build:web": "vite build",
     "build:go": "cd server && go build -o ask-rules-server .",
     "download:model": "scripts/download-model.sh",

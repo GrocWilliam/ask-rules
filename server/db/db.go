@@ -144,6 +144,10 @@ func DeleteSections(ctx context.Context, gameID string) error {
 }
 
 func InsertSection(ctx context.Context, s models.Section) error {
+	if s.Mechanics == nil {
+		s.Mechanics = []string{}
+	}
+
 	var embStr *string
 	if len(s.Embedding) == 384 {
 		var sb strings.Builder
@@ -158,18 +162,18 @@ func InsertSection(ctx context.Context, s models.Section) error {
 		str := sb.String()
 		embStr = &str
 	}
+	// search_vector est calculé par le trigger BEFORE INSERT
+	// (titre poids A, hierarchy_path+mecaniques poids B, contenu poids C)
 	_, err := Pool.Exec(ctx, `
 		INSERT INTO sections
-			(id, game_id, titre, niveau, type_section, contenu,
-			 entites, actions, resume, mecaniques, embedding,
-			 page_debut, page_fin, hierarchy_path, chunk_index, total_chunks,
-			 search_vector)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-			CASE WHEN $11::text IS NULL THEN NULL ELSE $11::vector END,
-			$12,$13,$14,$15,$16,
-			to_tsvector('french', $6))`,
-		s.ID, s.GameID, s.Title, s.Level, s.SectionType, s.Text,
-		s.Entities, s.Actions, s.Summary, s.Mechanics, embStr,
+			(id, game_id, titre, type_section, contenu,
+			 resume, mecaniques, embedding,
+			 page_debut, page_fin, hierarchy_path, chunk_index, total_chunks)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,
+			CASE WHEN $8::text IS NULL THEN NULL ELSE $8::vector END,
+			$9,$10,$11,$12,$13)`,
+		s.ID, s.GameID, s.Title, s.SectionType, s.Text,
+		s.Summary, s.Mechanics, embStr,
 		s.PageStart, s.PageEnd, s.HierarchyPath, s.ChunkIndex, s.TotalChunks)
 	return err
 }
@@ -208,16 +212,24 @@ func VectorSearch(ctx context.Context, gameID string, embedding []float64, limit
 }
 
 func FullTextSearch(ctx context.Context, gameID, query string, limit int) ([]models.ScoredSection, error) {
-	rows, err := Pool.Query(ctx, `
+	// Si la query contient un | on utilise to_tsquery (mots-clés OR),
+	// sinon plainto_tsquery (question en clair, plus tolérante).
+	var tsFunc string
+	if strings.Contains(query, " | ") {
+		tsFunc = "to_tsquery"
+	} else {
+		tsFunc = "plainto_tsquery"
+	}
+	sql := `
 		SELECT id, game_id, titre, type_section, contenu, resume,
 		       page_debut, page_fin,
-		       ts_rank(search_vector, plainto_tsquery('french', $1)) AS score
+		       ts_rank(search_vector, ` + tsFunc + `('french', $1)) AS score
 		FROM sections
 		WHERE game_id = $3
-		  AND search_vector @@ plainto_tsquery('french', $1)
+		  AND search_vector @@ ` + tsFunc + `('french', $1)
 		ORDER BY score DESC
-		LIMIT $2`,
-		query, limit, gameID)
+		LIMIT $2`
+	rows, err := Pool.Query(ctx, sql, query, limit, gameID)
 	if err != nil {
 		return nil, err
 	}

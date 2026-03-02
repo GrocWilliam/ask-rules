@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	maxContextChars = 3200
-	maxSections     = 6
+	maxContextChars  = 3200
+	maxSections      = 4
+	maxGameplayChars = 600 // budget pour le bloc gameplay dans le prompt
 )
 
 // BuildContext construit le texte de contexte envoyé au LLM.
@@ -38,6 +39,12 @@ func BuildContext(game *models.Game, sections []models.ScoredSection) string {
 		sb.WriteString(fmt.Sprintf("**Complexité** : %s\n", v))
 	}
 	sb.WriteString("\n")
+
+	// Résumé structural du gameplay (mécaniques, phases, setup, tour)
+	if gp := buildGameplayContext(game.Gameplay); gp != "" {
+		sb.WriteString(gp)
+		sb.WriteString("\n")
+	}
 
 	// Sections de contexte
 	count := maxSections
@@ -74,6 +81,70 @@ func BuildContext(game *models.Game, sections []models.ScoredSection) string {
 	return strings.TrimSpace(sb.String())
 }
 
+// buildGameplayContext génère un bloc textuel compact depuis game.Gameplay.
+// Inclut : mécaniques (labels), phases ordonnées, description setup/tour (tronquée).
+func buildGameplayContext(gameplay map[string]interface{}) string {
+	if len(gameplay) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("--- Gameplay ---\n")
+
+	// Mécaniques
+	if mechs, ok := gameplay["mechanics"].([]interface{}); ok && len(mechs) > 0 {
+		var labels []string
+		for _, m := range mechs {
+			if mm, ok := m.(map[string]interface{}); ok {
+				if l, ok := mm["label"].(string); ok && l != "" {
+					labels = append(labels, l)
+				}
+			}
+		}
+		if len(labels) > 0 {
+			sb.WriteString(fmt.Sprintf("Mécaniques : %s\n", strings.Join(labels, ", ")))
+		}
+	}
+
+	// Phases de jeu
+	if phases, ok := gameplay["phases"].([]interface{}); ok && len(phases) > 0 {
+		sb.WriteString("Phases : ")
+		var pnames []string
+		for _, p := range phases {
+			if pp, ok := p.(map[string]interface{}); ok {
+				if n, ok := pp["name"].(string); ok && n != "" {
+					pnames = append(pnames, n)
+				}
+			}
+		}
+		sb.WriteString(strings.Join(pnames, " → "))
+		sb.WriteString("\n")
+	}
+
+	// Description setup (tronquée)
+	for _, key := range []string{"setup", "turns"} {
+		labels := map[string]string{"setup": "Mise en place", "turns": "Tour de jeu"}
+		if section, ok := gameplay[key].(map[string]interface{}); ok {
+			if desc, ok := section["description"].(string); ok && desc != "" {
+				runes := []rune(strings.TrimSpace(desc))
+				if len(runes) > 180 {
+					desc = string(runes[:180]) + "…"
+				}
+				sb.WriteString(fmt.Sprintf("%s : %s\n", labels[key], desc))
+			}
+		}
+	}
+
+	result := strings.TrimSpace(sb.String())
+	if result == "--- Gameplay ---" {
+		return "" // rien d'utile extrait
+	}
+	if runes := []rune(result); len(runes) > maxGameplayChars {
+		result = string(runes[:maxGameplayChars]) + "…"
+	}
+	return result + "\n"
+}
+
 // BuildCompactContext construit un contexte plus court (pour questions simples).
 func BuildCompactContext(game *models.Game, sections []models.ScoredSection) string {
 	if len(sections) == 0 {
@@ -103,25 +174,35 @@ func BuildCompactContext(game *models.Game, sections []models.ScoredSection) str
 	return strings.TrimSpace(sb.String())
 }
 
+var sectionTypeLabels = map[string]string{
+	"setup":     "Mise en place",
+	"turn":      "Tour de jeu",
+	"scoring":   "Score & Victoire",
+	"end":       "Fin de partie",
+	"component": "Composants",
+	"special":   "Règle spéciale",
+	"example":   "Exemple",
+	"general":   "Règles",
+}
+
 func getSectionTitle(s models.ScoredSection, index int) string {
-	if s.Metadata != nil {
-		if st, ok := s.Metadata["section_type"].(string); ok && st != "" && st != "general" {
-			labels := map[string]string{
-				"setup":     "Mise en place",
-				"turn":      "Tour de jeu",
-				"scoring":   "Score & Victoire",
-				"end":       "Fin de partie",
-				"component": "Composants",
-				"special":   "Règle spéciale",
-				"example":   "Exemple",
-			}
-			if label, ok := labels[st]; ok {
-				return label
-			}
-		}
-		if page, ok := s.Metadata["page"].(float64); ok {
-			return fmt.Sprintf("Règles (p.%d)", int(page))
-		}
+	typeLabel := sectionTypeLabels[s.SectionType]
+	if typeLabel == "" {
+		typeLabel = "Règles"
 	}
-	return fmt.Sprintf("Extrait %d", index+1)
+
+	// Titre explicite de la section (ex: "Combat", "Mise en place du plateau")
+	if s.Title != "" {
+		if s.PageStart != nil {
+			return fmt.Sprintf("%s — %s (p.%d)", typeLabel, s.Title, *s.PageStart)
+		}
+		return fmt.Sprintf("%s — %s", typeLabel, s.Title)
+	}
+
+	// Pas de titre : type + page
+	if s.PageStart != nil {
+		return fmt.Sprintf("%s (p.%d)", typeLabel, *s.PageStart)
+	}
+
+	return fmt.Sprintf("%s %d", typeLabel, index+1)
 }

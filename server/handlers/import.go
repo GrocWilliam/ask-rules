@@ -53,7 +53,10 @@ func ImportSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gameName := r.FormValue("jeu")
+	gameName := r.FormValue("gameName")
+	if gameName == "" {
+		gameName = r.FormValue("jeu")
+	}
 	if gameName == "" {
 		gameName = r.FormValue("game")
 	}
@@ -62,9 +65,11 @@ func ImportSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files := r.MultipartForm.File["files"]
+	files := r.MultipartForm.File["fichier"]
 	if len(files) == 0 {
-		// Essaie le champ "file" au singulier
+		files = r.MultipartForm.File["files"]
+	}
+	if len(files) == 0 {
 		if f := r.MultipartForm.File["file"]; len(f) > 0 {
 			files = f
 		}
@@ -78,9 +83,34 @@ func ImportSSE(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
+	// Heartbeat : envoyer un ping toutes les 15 s pour éviter les timeouts proxy/navigateur
+	doneCh := make(chan struct{})
+	defer close(doneCh)
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				fmt.Fprintf(w, ": ping\n\n")
+				flusher.Flush()
+			case <-doneCh:
+				return
+			}
+		}
+	}()
+
+	// Mode d'import : "replace" (défaut) ou "merge"
+	mode := r.FormValue("mode")
+	if mode == "" {
+		mode = "replace"
+	}
+
 	// Créer ou trouver le jeu
-	game, _ := db.FindGameByName(ctx, gameName)
-	if game == nil {
+	existingGame, _ := db.FindGameByName(ctx, gameName)
+	isNew := existingGame == nil
+	game := existingGame
+	if isNew {
 		game = &models.Game{
 			ID:       newImportUUID(),
 			Name:     gameName,
@@ -115,6 +145,15 @@ func ImportSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Si mode "replace" et que le jeu existait déjà, supprimer ses sections
+	if !isNew && mode == "replace" {
+		if err := db.DeleteSections(ctx, game.ID); err != nil {
+			sendError("Erreur suppression des sections existantes: " + err.Error())
+			return
+		}
+		send("replacing", map[string]interface{}{"jeu": gameName})
+	}
+
 	// Lancer le pipeline
 	start := time.Now()
 	importErr := pipeline.Run(ctx, pipeline.ImportOptions{
@@ -144,6 +183,7 @@ func ReprocessGame(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 	flusher, _ := w.(http.Flusher)
 
 	send := func(t string, d map[string]interface{}) {
@@ -156,6 +196,25 @@ func ReprocessGame(w http.ResponseWriter, r *http.Request) {
 		if flusher != nil {
 			flusher.Flush()
 		}
+	}
+
+	// Heartbeat ping toutes les 15 s
+	doneCh := make(chan struct{})
+	defer close(doneCh)
+	if flusher != nil {
+		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					fmt.Fprintf(w, ": ping\n\n")
+					flusher.Flush()
+				case <-doneCh:
+					return
+				}
+			}
+		}()
 	}
 
 	var body struct {
@@ -216,6 +275,25 @@ func ReprocessAll(w http.ResponseWriter, r *http.Request) {
 		if flusher != nil {
 			flusher.Flush()
 		}
+	}
+
+	// Heartbeat ping toutes les 15 s
+	doneCh2 := make(chan struct{})
+	defer close(doneCh2)
+	if flusher != nil {
+		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					fmt.Fprintf(w, ": ping\n\n")
+					flusher.Flush()
+				case <-doneCh2:
+					return
+				}
+			}
+		}()
 	}
 
 	ctx := r.Context()

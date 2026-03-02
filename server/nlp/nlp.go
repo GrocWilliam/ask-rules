@@ -180,6 +180,160 @@ func ExtractKeywords(text string) []string {
 	return result
 }
 
+// actionVerbs liste les verbes d'action typiques dans les règles de jeu.
+var actionVerbs = []string{
+	// Composants
+	"piocher", "placer", "poser", "retirer", "défausser", "mélanger", "retourner",
+	"révéler", "dévoiler", "distribuer", "récupérer", "prendre", "remettre",
+	// Mouvement
+	"déplacer", "avancer", "reculer", "traverser", "entrer", "sortir", "franchir",
+	// Combat
+	"attaquer", "défendre", "combattre", "éliminer", "capturer", "protéger",
+	// Ressources
+	"collecter", "récolter", "produire", "payer", "acheter", "vendre", "dépenser",
+	"gagner", "perdre", "obtenir", "recevoir",
+	// Construction
+	"construire", "améliorer", "upgrader", "recruter", "déployer",
+	// Cartes / main
+	"jouer", "activer", "choisir", "sélectionner", "passer", "échanger",
+	"lancer", "résoudre", "appliquer", "déclencher",
+	// Tour
+	"commencer", "terminer", "finir", "passer", "sauter", "reporter",
+}
+
+// actionVerbsNorm est la version normalisée (sans accents) des verbes.
+var actionVerbsNorm []string
+
+func init() {
+	for _, v := range actionVerbs {
+		actionVerbsNorm = append(actionVerbsNorm, normalize(v))
+	}
+}
+
+// ExtractEntities extrait les entités nommées d'un texte :
+// composants du jeu (gameNouns) et mots capitalisés (noms propres de cartes/zones).
+func ExtractEntities(text string) []string {
+	seen := map[string]bool{}
+	var result []string
+
+	// 1. Noms du domaine jeu présents dans le texte (normalisés)
+	normText := normalize(text)
+	wordsNorm := strings.FieldsFunc(normText, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	for _, w := range wordsNorm {
+		lw := strings.ToLower(w)
+		if gameNouns[lw] && !seen[lw] {
+			seen[lw] = true
+			result = append(result, lw)
+		}
+	}
+
+	// 2. Mots capitalisés (noms propres hors début de phrase)
+	sentences := regexp.MustCompile(`[.!?]\s+`).Split(text, -1)
+	for _, sent := range sentences {
+		words := strings.Fields(sent)
+		for i, w := range words {
+			if i == 0 {
+				continue // ignorer le premier mot de la phrase
+			}
+			clean := strings.TrimFunc(w, func(r rune) bool { return !unicode.IsLetter(r) })
+			if len(clean) >= 2 && unicode.IsUpper([]rune(clean)[0]) {
+				lw := strings.ToLower(normalize(clean))
+				if !frenchStopwords[lw] && !seen[lw] {
+					seen[lw] = true
+					result = append(result, clean)
+				}
+			}
+		}
+	}
+
+	if len(result) > 20 {
+		result = result[:20]
+	}
+	return result
+}
+
+// ExtractActions extrait les verbes d'action présents dans un texte.
+func ExtractActions(text string) []string {
+	lower := normalize(strings.ToLower(text))
+	seen := map[string]bool{}
+	var result []string
+	for i, verbNorm := range actionVerbsNorm {
+		if strings.Contains(lower, verbNorm) && !seen[verbNorm] {
+			seen[verbNorm] = true
+			result = append(result, actionVerbs[i])
+		}
+	}
+	return result
+}
+
+// GameMeta contient les métadonnées extraites des règles du jeu.
+type GameMeta struct {
+	PlayersMin  int    `json:"players_min,omitempty"`
+	PlayersMax  int    `json:"players_max,omitempty"`
+	DurationMin int    `json:"duration_min,omitempty"`
+	DurationMax int    `json:"duration_max,omitempty"`
+	AgeMin      int    `json:"age_min,omitempty"`
+	Language    string `json:"language,omitempty"`
+}
+
+var (
+	rePlayersRange  = regexp.MustCompile(`(?i)(\d)\s*(?:à|[-–])\s*(\d)\s*joueurs?`)
+	rePlayersSingle = regexp.MustCompile(`(?i)(\d+)\s*joueurs?`)
+	reDurRange      = regexp.MustCompile(`(?i)(\d+)\s*(?:à|[-–])\s*(\d+)\s*min`)
+	reDurSingle     = regexp.MustCompile(`(?i)(\d+)\s*min(?:utes?)?`)
+	reAge           = regexp.MustCompile(`(?i)(?:à partir de |dès |age[: ]+)(\d+)\s*ans?`)
+)
+
+// ExtractGameMeta extrait les métadonnées de jeu (joueurs, durée, âge) depuis les règles.
+// Typiquement appelé sur les premiers chunks (couverture / matériel).
+func ExtractGameMeta(chunks []string) map[string]interface{} {
+	meta := map[string]interface{}{}
+
+	for _, chunk := range chunks {
+		// Joueurs
+		if _, ok := meta["players_min"]; !ok {
+			if m := rePlayersRange.FindStringSubmatch(chunk); m != nil {
+				meta["players_min"] = atoi(m[1])
+				meta["players_max"] = atoi(m[2])
+			} else if m := rePlayersSingle.FindStringSubmatch(chunk); m != nil {
+				n := atoi(m[1])
+				meta["players_min"] = n
+				meta["players_max"] = n
+			}
+		}
+		// Durée
+		if _, ok := meta["duration_min"]; !ok {
+			if m := reDurRange.FindStringSubmatch(chunk); m != nil {
+				meta["duration_min"] = atoi(m[1])
+				meta["duration_max"] = atoi(m[2])
+			} else if m := reDurSingle.FindStringSubmatch(chunk); m != nil {
+				d := atoi(m[1])
+				meta["duration_min"] = d
+				meta["duration_max"] = d
+			}
+		}
+		// Âge
+		if _, ok := meta["age_min"]; !ok {
+			if m := reAge.FindStringSubmatch(chunk); m != nil {
+				meta["age_min"] = atoi(m[1])
+			}
+		}
+	}
+	return meta
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			n = n*10 + int(c-'0')
+		}
+	}
+	return n
+}
+
 // normalize enlève les accents pour la comparaison.
 func normalize(s string) string {
 	var b strings.Builder

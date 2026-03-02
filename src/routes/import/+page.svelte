@@ -35,6 +35,9 @@
   let embedding: EmbeddingState | null = null;
   let result: SuccessResult | ErrorResult | null = null;
 
+  // État intermédiaire pour accumuler les infos du pipeline
+  let totalChunks = 0;
+
   // ── Soumission avec affichage en temps réel ─────────────────────────────────
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
@@ -42,12 +45,13 @@
     steps = [];
     embedding = null;
     result = null;
+    totalChunks = 0;
 
     const form = e.currentTarget as HTMLFormElement;
     const formData = new FormData(form);
 
     try {
-      const response = await fetch('/import', {
+      const response = await fetch('/api/import', {
         method: 'POST',
         body: formData,
       });
@@ -75,26 +79,51 @@
             continue;
           }
 
-          if (evt.type === 'step') {
-            steps = [...steps, { message: evt.message as string }];
-          } else if (evt.type === 'embedding_start') {
-            embedding = { current: 0, total: evt.total as number };
-          } else if (evt.type === 'embedding_progress') {
-            embedding = {
-              current: evt.current as number,
-              total: evt.total as number,
-            };
+          // Événements émis par le handler Go
+          if (evt.type === 'start') {
+            steps = [...steps, { message: `Import de « ${evt.jeu} » — ${evt.files} fichier(s)` }];
+          } else if (evt.type === 'replacing') {
+            steps = [
+              ...steps,
+              { message: `🗑 Sections existantes supprimées pour « ${evt.jeu} »` },
+            ];
+          } else if (evt.type === 'uploading') {
+            steps = [...steps, { message: `Envoi du fichier : ${evt.file}` }];
+          } else if (evt.type === 'extracting') {
+            steps = [...steps, { message: `Extraction du texte : ${evt.file}` }];
+          } else if (evt.type === 'chunking') {
+            steps = [...steps, { message: `Découpage en sections…` }];
+          } else if (evt.type === 'embedding') {
+            // début des embeddings
+            embedding = { current: 0, total: evt.chunks as number };
+          } else if (evt.type === 'progress') {
+            embedding = { current: evt.done as number, total: evt.total as number };
+          } else if (evt.type === 'gameplay') {
+            if ((evt as any).status === 'done') {
+              steps = [
+                ...steps,
+                {
+                  message: `Gameplay extrait — ${evt.mechanics ?? 0} mécaniques, ${evt.phases ?? 0} phases`,
+                },
+              ];
+            }
           } else if (evt.type === 'done') {
+            // done du pipeline (fin d'un fichier)
+            totalChunks = evt.total_chunks as number;
+          } else if (evt.type === 'complete') {
+            // complete final de ImportSSE
             embedding = null;
             result = {
               ok: true,
               jeu: evt.jeu as string,
-              sections: evt.sections as number,
-              action: evt.action as string,
-              mecaniques: evt.mecaniques as string[],
+              sections: totalChunks,
+              action: 'indexé',
+              mecaniques: [],
             };
+          } else if (evt.type === 'file_error' || evt.type === 'section_error') {
+            steps = [...steps, { message: `⚠ ${evt.error}` }];
           } else if (evt.type === 'error') {
-            result = { ok: false, error: evt.message as string };
+            result = { ok: false, error: (evt.error ?? evt.message) as string };
           }
         }
       }

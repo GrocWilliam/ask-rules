@@ -90,6 +90,21 @@ func Migrate(ctx context.Context) error {
 				ADD COLUMN IF NOT EXISTS search_vector tsvector`,
 		},
 
+		// ── Suppression des colonnes orphelines ────────────────────────────────
+		// niveau : toujours 1 (inutile), entites/actions : déjà dans contenu
+		{
+			"drop colonne niveau",
+			`ALTER TABLE sections DROP COLUMN IF EXISTS niveau`,
+		},
+		{
+			"drop colonne entites",
+			`ALTER TABLE sections DROP COLUMN IF EXISTS entites`,
+		},
+		{
+			"drop colonne actions",
+			`ALTER TABLE sections DROP COLUMN IF EXISTS actions`,
+		},
+
 		// ── Table logs ────────────────────────────────────────────────────────
 		{
 			"table logs",
@@ -136,13 +151,13 @@ func Migrate(ctx context.Context) error {
 
 		// ── Backfill search_vector pour les sections existantes ───────────────
 		{
-			"backfill search_vector",
+			"backfill search_vector avec mecaniques",
 			`UPDATE sections
 				SET search_vector =
 					setweight(to_tsvector('french', coalesce(titre, '')), 'A') ||
 					setweight(to_tsvector('french', coalesce(hierarchy_path, '')), 'B') ||
-					setweight(to_tsvector('french', coalesce(contenu, '')), 'C')
-				WHERE search_vector IS NULL`,
+					setweight(to_tsvector('french', coalesce(array_to_string(mecaniques, ' '), '')), 'B') ||
+					setweight(to_tsvector('french', coalesce(contenu, '')), 'C')`,
 		},
 
 		// ── Trigger de mise à jour automatique du search_vector ───────────────
@@ -153,6 +168,7 @@ func Migrate(ctx context.Context) error {
 				NEW.search_vector :=
 					setweight(to_tsvector('french', coalesce(NEW.titre, '')), 'A') ||
 					setweight(to_tsvector('french', coalesce(NEW.hierarchy_path, '')), 'B') ||
+					setweight(to_tsvector('french', coalesce(array_to_string(NEW.mecaniques, ' '), '')), 'B') ||
 					setweight(to_tsvector('french', coalesce(NEW.contenu, '')), 'C');
 				RETURN NEW;
 			END
@@ -162,7 +178,7 @@ func Migrate(ctx context.Context) error {
 			"trigger sections_search_vector_update",
 			`DROP TRIGGER IF EXISTS sections_search_vector_update ON sections;
 			CREATE TRIGGER sections_search_vector_update
-				BEFORE INSERT OR UPDATE OF titre, hierarchy_path, contenu
+				BEFORE INSERT OR UPDATE OF titre, hierarchy_path, mecaniques, contenu
 				ON sections
 				FOR EACH ROW
 				EXECUTE FUNCTION sections_search_vector_trigger()`,
