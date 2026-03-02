@@ -7,3 +7,5 @@ build
 # Fichiers uploadés (stockage local)
 uploads/
 !uploads/.gitkeep
+models
+server/ask-rules-server

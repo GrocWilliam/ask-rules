@@ -19,7 +19,7 @@ import (
 	"ask-rules-server/router"
 )
 
-//go:embed build
+//go:embed all:build
 var staticFS embed.FS
 
 func main() {
