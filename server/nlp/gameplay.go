@@ -98,23 +98,38 @@ var (
 // ExtractGameplay analyse l'ensemble des chunks d'un jeu et retourne la
 // structure de gameplay complète : mise en place, tours, manches, fin de partie,
 // mécaniques identifiées avec contexte, et phases/étapes ordonnées.
+// Optimisé pour limiter la consommation mémoire : traite max 150 chunks.
 func ExtractGameplay(chunks []string) *GameplayData {
+	// Limiter le nombre de chunks traités pour éviter surcharge RAM
+	const maxChunksToProcess = 150
+	processChunks := chunks
+	if len(chunks) > maxChunksToProcess {
+		processChunks = chunks[:maxChunksToProcess]
+	}
+
 	var setupTexts, roundTexts, turnTexts, endTexts []string
 
-	for _, text := range chunks {
+	for _, text := range processChunks {
 		stype := DetectSectionType("", text)
 		lowerNorm := strings.ToLower(normalize(text))
 
 		switch stype {
 		case TypeSetup:
-			setupTexts = append(setupTexts, text)
+			// Limiter le nombre de textes accumulés
+			if len(setupTexts) < 10 {
+				setupTexts = append(setupTexts, text)
+			}
 		case TypeTurn:
-			turnTexts = append(turnTexts, text)
+			if len(turnTexts) < 10 {
+				turnTexts = append(turnTexts, text)
+			}
 		case TypeEnd:
-			endTexts = append(endTexts, text)
+			if len(endTexts) < 10 {
+				endTexts = append(endTexts, text)
+			}
 		}
 		// Les manches peuvent être mentionnées dans tout type de section
-		if roundRe.MatchString(lowerNorm) && stype != TypeSetup {
+		if len(roundTexts) < 10 && roundRe.MatchString(lowerNorm) && stype != TypeSetup {
 			roundTexts = append(roundTexts, text)
 		}
 	}
@@ -133,8 +148,8 @@ func ExtractGameplay(chunks []string) *GameplayData {
 		data.EndGame = buildSection("Fin de partie", endTexts)
 	}
 
-	data.Mechanics = extractMechanicsWithContext(chunks)
-	data.Phases = extractPhases(chunks)
+	data.Mechanics = extractMechanicsWithContext(processChunks)
+	data.Phases = extractPhases(processChunks)
 
 	return data
 }
@@ -149,15 +164,19 @@ func (g *GameplayData) IsEmpty() bool {
 
 // buildSection construit une GameplaySection depuis un ensemble de textes bruts.
 // Sélectionne les phrases les plus représentatives et les mots-clés du domaine.
+// Optimisé pour limiter allocations mémoire.
 func buildSection(title string, texts []string) *GameplaySection {
 	const maxDescLen = 700 // caractères max de la description
 
+	// Limiter le nombre de textes traités pour réduire usage mémoire
+	maxTexts := 3
+	if len(texts) < maxTexts {
+		maxTexts = len(texts)
+	}
+
 	var descParts []string
-	for i, t := range texts {
-		if i >= 3 {
-			break
-		}
-		sentences := splitSentences(t)
+	for i := 0; i < maxTexts; i++ {
+		sentences := splitSentences(texts[i])
 		var part strings.Builder
 		for _, s := range sentences {
 			if part.Len()+len(s)+2 > maxDescLen/2 {
@@ -179,8 +198,12 @@ func buildSection(title string, texts []string) *GameplaySection {
 		desc = string(runes[:maxDescLen]) + "…"
 	}
 
-	// Mots-clés depuis tous les textes (max 12)
-	kws := ExtractKeywords(strings.Join(texts, " "))
+	// Mots-clés depuis les textes traités uniquement (max 12)
+	var kwTexts []string
+	for i := 0; i < maxTexts && i < len(texts); i++ {
+		kwTexts = append(kwTexts, texts[i])
+	}
+	kws := ExtractKeywords(strings.Join(kwTexts, " "))
 	if len(kws) > 12 {
 		kws = kws[:12]
 	}

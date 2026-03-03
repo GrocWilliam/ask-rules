@@ -45,26 +45,22 @@ func Run(ctx context.Context, opts ImportOptions) error {
 	}
 
 	totalChunks := 0
-	// Accumuler tous les textes pour l'extraction de gameplay
-	var allChunkTexts []string
+	// Limiter la taille du buffer pour l'extraction de gameplay (éviter surcharge RAM)
+	const maxChunksForGameplay = 150 // ~90KB de texte max en mémoire
+	var gameplayChunks []string
+	var metaChunks []string
 
 	for _, fp := range opts.FilePaths {
-		chunkTexts, fileErr := processFile(ctx, game, fp, emit, &totalChunks)
-		if fileErr != nil {
-			emit("file_error", map[string]interface{}{"file": fp, "error": fileErr.Error()})
-			// continuer avec les autres fichiers
+		chunkCount := processFileStreaming(ctx, game, fp, emit, &totalChunks, &gameplayChunks, &metaChunks, maxChunksForGameplay)
+		if chunkCount < 0 {
+			emit("file_error", map[string]interface{}{"file": fp, "error": "Erreur traitement fichier"})
+			continue
 		}
-		allChunkTexts = append(allChunkTexts, chunkTexts...)
 	}
 
 	// ── Extraction des métadonnées du jeu ─────────────────────────────────────
-	if len(allChunkTexts) > 0 {
-		// Chercher dans les 5 premiers chunks (couverture, matériel)
-		sampleSize := 5
-		if len(allChunkTexts) < sampleSize {
-			sampleSize = len(allChunkTexts)
-		}
-		gameMeta := nlp.ExtractGameMeta(allChunkTexts[:sampleSize])
+	if len(metaChunks) > 0 {
+		gameMeta := nlp.ExtractGameMeta(metaChunks)
 		if len(gameMeta) > 0 {
 			if game.Metadata == nil {
 				game.Metadata = map[string]interface{}{}
@@ -75,24 +71,28 @@ func Run(ctx context.Context, opts ImportOptions) error {
 			_ = db.UpsertGame(ctx, game)
 		}
 	}
+	metaChunks = nil // Libérer mémoire
 
 	// ── Extraction du gameplay ─────────────────────────────────────────────
-	emit("gameplay", map[string]interface{}{"status": "extracting", "chunks": len(allChunkTexts)})
+	if len(gameplayChunks) > 0 {
+		emit("gameplay", map[string]interface{}{"status": "extracting", "chunks": len(gameplayChunks)})
+		gameplayData := nlp.ExtractGameplay(gameplayChunks)
+		gameplayChunks = nil // Libérer mémoire immédiatement
 
-	gameplayData := nlp.ExtractGameplay(allChunkTexts)
-	if !gameplayData.IsEmpty() {
-		if gMap := gameplayDataToMap(gameplayData); gMap != nil {
-			if saveErr := db.UpdateGameplay(ctx, game.ID, gMap); saveErr != nil {
-				emit("gameplay_error", map[string]interface{}{"error": saveErr.Error()})
-			} else {
-				emit("gameplay", map[string]interface{}{
-					"status":    "done",
-					"mechanics": len(gameplayData.Mechanics),
-					"phases":    len(gameplayData.Phases),
-					"has_setup": gameplayData.Setup != nil,
-					"has_turns": gameplayData.Turns != nil,
-					"has_end":   gameplayData.EndGame != nil,
-				})
+		if !gameplayData.IsEmpty() {
+			if gMap := gameplayDataToMap(gameplayData); gMap != nil {
+				if saveErr := db.UpdateGameplay(ctx, game.ID, gMap); saveErr != nil {
+					emit("gameplay_error", map[string]interface{}{"error": saveErr.Error()})
+				} else {
+					emit("gameplay", map[string]interface{}{
+						"status":    "done",
+						"mechanics": len(gameplayData.Mechanics),
+						"phases":    len(gameplayData.Phases),
+						"has_setup": gameplayData.Setup != nil,
+						"has_turns": gameplayData.Turns != nil,
+						"has_end":   gameplayData.EndGame != nil,
+					})
+				}
 			}
 		}
 	}
@@ -104,32 +104,47 @@ func Run(ctx context.Context, opts ImportOptions) error {
 	return nil
 }
 
-func processFile(ctx context.Context, game *models.Game, fp string, emit func(string, map[string]interface{}), total *int) ([]string, error) {
+// processFileStreaming traite un fichier en streaming sans accumuler tous les chunks.
+// Ajoute sélectivement les chunks aux buffers gameplayChunks et metaChunks.
+// Retourne le nombre de chunks traités, ou -1 en cas d'erreur.
+func processFileStreaming(
+	ctx context.Context,
+	game *models.Game,
+	fp string,
+	emit func(string, map[string]interface{}),
+	total *int,
+	gameplayChunks *[]string,
+	metaChunks *[]string,
+	maxChunks int,
+) int {
 	absPath := storage.GetAbsolutePath(fp)
 
 	emit("extracting", map[string]interface{}{"file": fp})
 	text, pages, err := ExtractText(absPath)
 	if err != nil {
-		return nil, fmt.Errorf("extraction: %w", err)
+		return -1
 	}
 	if strings.TrimSpace(text) == "" {
-		return nil, fmt.Errorf("fichier vide: %s", fp)
+		return -1
 	}
 
 	emit("chunking", map[string]interface{}{"file": fp, "text_length": len(text)})
 	chunks := ChunkText(text, pages)
 
+	// Libérer le texte source immédiatement
+	text = ""
+	pages = nil
+
 	emit("embedding", map[string]interface{}{"file": fp, "chunks": len(chunks)})
 
-	var chunkTexts []string
+	processedCount := 0
 	for i, chunk := range chunks {
 		select {
 		case <-ctx.Done():
-			return chunkTexts, ctx.Err()
+			return processedCount
 		default:
 		}
 
-		// Embedding
 		// Nettoyer les séquences UTF-8 invalides (pdftotext peut en produire)
 		cleanText := sanitizeUTF8(chunk.Text)
 
@@ -159,7 +174,7 @@ func processFile(ctx context.Context, game *models.Game, fp string, emit func(st
 			Embedding:     vecToFloat64(vec),
 			PageStart:     intPtr(chunk.PageStart),
 			PageEnd:       intPtr(chunk.PageEnd),
-			HierarchyPath: sectionType, // type de section comme chemin hiérarchique pour le FTS
+			HierarchyPath: sectionType,
 			ChunkIndex:    i,
 			TotalChunks:   len(chunks),
 		}
@@ -168,7 +183,15 @@ func processFile(ctx context.Context, game *models.Game, fp string, emit func(st
 			emit("section_error", map[string]interface{}{"index": i, "error": err.Error()})
 		} else {
 			*total++
-			chunkTexts = append(chunkTexts, cleanText)
+			processedCount++
+
+			// Garder en mémoire seulement les chunks nécessaires pour metadata/gameplay
+			if len(*metaChunks) < 5 {
+				*metaChunks = append(*metaChunks, cleanText)
+			}
+			if len(*gameplayChunks) < maxChunks {
+				*gameplayChunks = append(*gameplayChunks, cleanText)
+			}
 		}
 
 		if i%10 == 0 {
@@ -176,7 +199,7 @@ func processFile(ctx context.Context, game *models.Game, fp string, emit func(st
 		}
 	}
 
-	return chunkTexts, nil
+	return processedCount
 }
 
 // gameplayDataToMap convertit GameplayData en map[string]interface{} via JSON
