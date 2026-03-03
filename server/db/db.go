@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"ask-rules-server/config"
 	"ask-rules-server/models"
@@ -17,8 +18,18 @@ import (
 var Pool *pgxpool.Pool
 
 func Connect() error {
-	var err error
-	Pool, err = pgxpool.New(context.Background(), config.C.DatabaseURL)
+	poolConfig, err := pgxpool.ParseConfig(config.C.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("config PostgreSQL invalide : %w", err)
+	}
+
+	// Optimisation RAM : limiter le nombre de connexions
+	// Pour un backend API simple, 2-4 connexions suffisent largement
+	poolConfig.MaxConns = 4 // Au lieu de ~10-20 par défaut
+	poolConfig.MinConns = 1 // Minimum de connexions à maintenir
+	poolConfig.MaxConnIdleTime = 5 * time.Minute
+
+	Pool, err = pgxpool.NewWithConfig(context.Background(), poolConfig)
 	if err != nil {
 		return fmt.Errorf("connexion PostgreSQL : %w", err)
 	}

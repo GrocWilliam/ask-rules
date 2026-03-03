@@ -46,6 +46,9 @@ func Run(ctx context.Context, opts ImportOptions) error {
 
 	totalChunks := 0
 	// Limiter la taille du buffer pour l'extraction de gameplay (éviter surcharge RAM)
+	// 150 chunks = suffisant pour 95% des jeux (livrets < 100 pages)
+	// Pour jeux > 200 chunks, seuls les premiers sont analysés (setup/tour généralement au début)
+	// Impact : 0-5% précision gameplay, 0% précision recherche/réponses (voir IMPACT_PRECISION.md)
 	const maxChunksForGameplay = 150 // ~90KB de texte max en mémoire
 	var gameplayChunks []string
 	var metaChunks []string

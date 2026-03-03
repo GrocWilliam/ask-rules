@@ -16,12 +16,16 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const ttl = 24 * time.Hour
+const (
+	ttl             = 24 * time.Hour
+	maxMemEntries   = 200 // Limite du cache mémoire pour éviter surconsommation RAM
+	cleanupInterval = 5 * time.Minute
+)
 
 var (
-	client  *redis.Client
+	client   *redis.Client
 	useRedis bool
-	memMu   sync.RWMutex
+	memMu    sync.RWMutex
 	memStore = make(map[string]*cacheEntry)
 )
 
@@ -51,6 +55,10 @@ func Init() {
 		return
 	}
 	useRedis = true
+	// Lancer le nettoyage périodique du cache mémoire
+	if !useRedis {
+		go cleanupMemCache()
+	}
 }
 
 func Key(question, jeu string) string {
@@ -93,8 +101,27 @@ func Set(ctx context.Context, key string, resp models.AskResponse) {
 		return
 	}
 	memMu.Lock()
+	defer memMu.Unlock()
+
+	// Limiter la taille du cache en mémoire
+	if len(memStore) >= maxMemEntries {
+		// Supprimer 20% des entrées les plus anciennes
+		var toDelete []string
+		now := time.Now()
+		for k, v := range memStore {
+			if now.After(v.Expires) || len(toDelete) < maxMemEntries/5 {
+				toDelete = append(toDelete, k)
+			}
+			if len(toDelete) >= maxMemEntries/5 {
+				break
+			}
+		}
+		for _, k := range toDelete {
+			delete(memStore, k)
+		}
+	}
+
 	memStore[key] = &cacheEntry{Resp: resp, Expires: time.Now().Add(ttl)}
-	memMu.Unlock()
 }
 
 func Invalidate(ctx context.Context, key string) {
@@ -105,4 +132,21 @@ func Invalidate(ctx context.Context, key string) {
 	memMu.Lock()
 	delete(memStore, key)
 	memMu.Unlock()
+}
+
+// cleanupMemCache supprime périodiquement les entrées expirées du cache mémoire.
+func cleanupMemCache() {
+	ticker := time.NewTicker(cleanupInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		memMu.Lock()
+		now := time.Now()
+		for k, v := range memStore {
+			if now.After(v.Expires) {
+				delete(memStore, k)
+			}
+		}
+		memMu.Unlock()
+	}
 }
