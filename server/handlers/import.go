@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -175,6 +176,8 @@ func ImportSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.GameAdded(ctx, gameName, len(filePaths))
+	// Libérer mémoire après import
+	runtime.GC()
 	send("complete", map[string]interface{}{
 		"jeu":      gameName,
 		"files":    len(filePaths),
@@ -438,6 +441,10 @@ func ReprocessAll(w http.ResponseWriter, r *http.Request) {
 			"total": len(games),
 		})
 		successCount++
+
+		// Libérer mémoire explicitement après chaque jeu traité
+		// pour éviter l'accumulation de RAM lors du retraitement de nombreux jeux
+		runtime.GC()
 	}
 
 	send("complete", map[string]interface{}{

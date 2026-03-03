@@ -33,8 +33,15 @@ func ChunkText(text string, pages []PageInfo) []Chunk {
 	paragraphs := splitParagraphs(text)
 	paragraphs = mergeParagraphs(paragraphs, MinParagraphSize)
 	paragraphs = mergeOrphanContinuations(paragraphs)
-	var chunks []Chunk
+
+	// Pré-allouer avec capacité estimée pour réduire réallocations
+	estimatedChunks := len(text) / (DefaultChunkSize * 2)
+	if estimatedChunks < 10 {
+		estimatedChunks = 10
+	}
+	chunks := make([]Chunk, 0, estimatedChunks)
 	var current strings.Builder
+	current.Grow(DefaultChunkSize * 2) // Pré-allouer buffer
 	position := 0
 
 	flush := func() {
@@ -92,6 +99,9 @@ func ChunkText(text string, pages []PageInfo) []Chunk {
 	if current.Len() > 0 {
 		flush()
 	}
+
+	// Libérer mémoire des paragraphes intermédiaires
+	paragraphs = nil
 
 	return chunks
 }
