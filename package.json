@@ -30,23 +30,15 @@
   "type": "module",
   "packageManager": "pnpm@10.23.0",
   "dependencies": {
-    "@huggingface/transformers": "^3.8.1",
     "@sveltejs/adapter-static": "3.0.8",
     "@sveltejs/kit": "2.53.0",
-    "chalk": "4.1.2",
     "dotenv": "17.3.1",
     "marked": "^17.0.3",
-    "natural": "8.1.0",
-    "pdf-parse": "^2.4.5",
-    "pg": "8.18.0",
-    "redis": "^4.7.0",
     "svelte": "5.53.3"
   },
   "devDependencies": {
     "@types/marked": "^6.0.0",
     "@types/node": "22.0.0",
-    "@types/pdf-parse": "^1.1.5",
-    "@types/pg": "8.16.0",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
     "eslint": "^10.0.2",
