@@ -41,7 +41,7 @@ for FILE in "${FILES[@]}"; do
   fi
 
   echo -n "  ↓ ${FILE} ... "
-  if curl -fsSL --retry 3 --retry-delay 2 -o "${OUT}" "${URL}"; then
+  if curl --retry 3 --retry-delay 2 -o "${OUT}" "${URL}"; then
     SIZE=$(du -sh "${OUT}" | cut -f1)
     echo "${SIZE}"
   else

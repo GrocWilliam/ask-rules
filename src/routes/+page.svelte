@@ -76,9 +76,9 @@
   const suggestedQuestions = [
     'Comment jouer ?',
     'Comment gagner ?',
+    'Quelles sont les conditions de fin de partie ?',
     'Comment se déroule un tour ?',
     'Comment se déroule un combat ?',
-    'Quelle est la mise en place ?',
     'Quelles sont les actions disponibles ?',
   ];
 
@@ -115,7 +115,7 @@
       const res = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, jeu: selectedGame }),
+        body: JSON.stringify({ question, game: selectedGame }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -198,7 +198,6 @@
             <span class="game-search-icon">🔍</span>
           {/if}
           <!-- Champ caché pour la soumission -->
-          <input type="hidden" name="jeu" value={selectedGame} />
           {#if showGameDropdown}
             <ul class="game-dropdown">
               {#if filteredGames.length === 0}
@@ -258,7 +257,7 @@
         <!-- Jeu sélectionné -->
         <div class="game-badge">
           <span class="game-icon">🎲</span>
-          <span>{form.jeu}</span>
+          <span>{selectedGame}</span>
         </div>
 
         <!-- Lien(s) de téléchargement du fichier source -->
