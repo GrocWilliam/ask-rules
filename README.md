@@ -8,42 +8,55 @@ Assistant IA pour interroger des règles de jeux de société en français.
 
 ## Architecture
 
+**Clean Architecture à 4 couches** :
+
 ```
 ask-rules/
-├── server/                      # Binaire Go — sert tout (API + frontend)
-│   ├── main.go                  # Démarrage, migration auto, graceful shutdown
-│   ├── config/config.go         # Variables d'environnement
-│   ├── db/
-│   │   ├── db.go                # Pool pgx v5, queries
-│   │   └── migrate.go           # Migration DDL idempotente (lancée au démarrage)
-│   ├── embedder/embedder.go     # BERT local via onnxruntime_go (384 dims)
-│   ├── handlers/                # Handlers HTTP Chi
-│   │   ├── ask.go               # POST /api/ask
-│   │   ├── games.go             # CRUD jeux
-│   │   ├── import.go            # ImportSSE, ReprocessGame, ReprocessAll (SSE)
-│   │   ├── files.go             # ServeFile, ListFiles, DeleteFile
-│   │   ├── admin.go             # Login / Logout / Check
-│   │   └── logs.go              # GET /api/admin/logs
-│   ├── pipeline/                # Extraction texte → chunks → embeddings
-│   ├── retriever/               # Hybrid search (vecteur + full-text, RRF)
-│   ├── nlp/nlp.go               # Stopwords FR (~320), GAME_NOUNS (~200), mécaniques
-│   ├── llm/llm.go               # Clients Mistral / OpenAI / Ollama
-│   ├── cache/cache.go           # Redis ou in-memory (SHA-256 key, TTL 24h)
-│   ├── router/router.go         # Chi — routes publiques, admin, SPA fallback
-│   ├── middleware/              # Auth cookie, rate limiting
-│   └── build/                  # SvelteKit statique (go:embed)
+├── server/
+│   ├── cmd/server/main.go       # Point d'entrée — DI, graceful shutdown
+│   ├── internal/
+│   │   ├── domain/              # Entités métier + interfaces (repository, service)
+│   │   │   ├── entity/          # Game, Section, User
+│   │   │   ├── repository/      # Interfaces pour persistence
+│   │   │   └── service/         # Interfaces LLM, Cache, Embedder
+│   │   ├── application/         # Use cases (logique métier pure)
+│   │   │   └── usecase/         # AskQuestion, ImportGame, DeleteGame...
+│   │   ├── infrastructure/      # Implémentations concrètes
+│   │   │   ├── config/          # Chargement .env
+│   │   │   ├── persistence/     # PostgreSQL repositories + migration
+│   │   │   │   ├── db/          # Pool pgx v5
+│   │   │   │   └── postgres/    # Implémentations repository
+│   │   │   └── service/         # Embedder, LLM, Cache, Retriever, Pipeline
+│   │   └── interfaces/          # Adaptateurs HTTP/CLI
+│   │       └── http/
+│   │           ├── handler/     # AskHandler, GamesHandler...
+│   │           ├── middleware/  # AdminAuth, RateLimit
+│   │           └── router/      # Chi router + timeouts par route
+│   ├── .air.toml                # Live-reload Go (dev)
+│   └── build/                   # SvelteKit statique (go:embed)
 ├── src/                         # Frontend SvelteKit (adapter-static)
 │   ├── routes/
-│   │   ├── +page.svelte         # Interface de question/réponse
-│   │   ├── import/              # Import de fichiers (SSE temps réel)
+│   │   ├── +page.svelte         # Interface Q&A
+│   │   ├── import/              # Import SSE (heartbeat 15s)
 │   │   └── admin/               # Gestion jeux, fichiers, logs
-│   └── lib/                     # Composants (SEO, Markdown, PWA…)
-├── uploads/                     # Fichiers uploadés (un sous-dossier par jeu)
-├── models/                      # Modèle ONNX (non versionné)
+│   └── lib/                     # Composants (SEO, Markdown, PWA)
+├── static/
+│   ├── service-worker.js        # PWA avec exclusions /api/*
+│   └── manifest.json
+├── uploads/                     # Fichiers uploadés par jeu
+├── models/                      # ONNX (non versionné, téléchargé au build)
 │   └── multilingual-e5-small/
-├── Dockerfile                   # Multi-stage : web-builder → go-builder → runtime
-└── docs/                        # Guides techniques
+├── Dockerfile                   # Multi-stage (web + Go CGO + runtime)
+└── .env.example
 ```
+
+**Points techniques clés** :
+
+- **Dependency Injection** : Repositories injectés dans use cases via constructeurs
+- **Chi Router** : Middleware CORS, Logger, Recoverer, timeouts par route
+- **SSE Streaming** : Import avec heartbeat 15s pour éviter timeouts proxy/navigateur
+- **Logging** : `[ERROR]`/`[WARN]` avec contexte (handler, use case, game name)
+- **PWA** : Service Worker qui exclut `/api/*` et `text/event-stream`
 
 ---
 
@@ -52,16 +65,16 @@ ask-rules/
 - **Go 1.22+**
 - **Node.js 18+ + pnpm**
 - **PostgreSQL 14+** avec l'extension `pgvector`
-- **libonnxruntime.so 1.13.0** (voir ci-dessous)
+- **libonnxruntime.so 1.20.0** (voir ci-dessous)
 - Redis (optionnel)
 
 ### Installer libonnxruntime
 
 ```bash
-# Linux x64
-curl -fsSL https://github.com/microsoft/onnxruntime/releases/download/v1.13.0/onnxruntime-linux-x64-1.13.0.tgz \
-  | tar -xz --strip-components=2 -C /usr/local/lib '*/lib/libonnxruntime.so.1.13.0'
-mv /usr/local/lib/libonnxruntime.so.1.13.0 /usr/local/lib/libonnxruntime.so
+# Linux x64 (version 1.20.0 pour correspondre au Dockerfile)
+curl -fsSL https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/onnxruntime-linux-x64-1.20.0.tgz \
+  | tar -xz --strip-components=2 -C /usr/local/lib '*/lib/libonnxruntime.so.1.20.0'
+mv /usr/local/lib/libonnxruntime.so.1.20.0 /usr/local/lib/libonnxruntime.so
 ldconfig
 ```
 
@@ -83,43 +96,55 @@ cp .env.example .env    # puis renseigner DATABASE_URL, MISTRAL_API_KEY, etc.
 # 2. Installer les dépendances frontend
 pnpm install
 
-# 3. Builder SvelteKit + Go en une commande
+# 3. Installer Air (live-reload Go)
+go install github.com/air-verse/air@latest
+
+# 4. Builder SvelteKit + Go en une commande
 pnpm run build:all
 
-# 4. Lancer le serveur
+# 5. Lancer le serveur
 pnpm start              # → http://localhost:3001
+
+# 6. Development avec live-reload (optionnel)
+pnpm run dev:back       # Air watch le code Go (server/)
+pnpm run dev:front      # Vite dev server pour SvelteKit
 ```
 
 ### Scripts disponibles
 
-| Commande | Description |
-|---|---|
-| `pnpm run build:web` | Build SvelteKit → `server/build/` |
-| `pnpm run build:go` | Compile le binaire Go |
-| `pnpm run build:all` | Les deux en séquence |
-| `pnpm start` | Lance `server/ask-rules-server` |
+| Commande             | Description                                             |
+| -------------------- | ------------------------------------------------------- |
+| `pnpm run build:web` | Build SvelteKit → `server/build/`                       |
+| `pnpm run build:go`  | Compile le binaire Go depuis `cmd/server`               |
+| `pnpm run build:all` | Les deux en séquence                                    |
+| `pnpm start`         | Lance `server/ask-rules-server` (production)            |
+| `pnpm run dev:back`  | Air live-reload pour Go (recompile à chaque changement) |
+| `pnpm run dev:front` | Vite dev server (HMR SvelteKit)                         |
 
 ---
 
 ## Variables d'environnement
 
-| Variable | Défaut | Description |
-|---|---|---|
-| `DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/ask-rules` | PostgreSQL |
-| `PORT` | `3001` | Port d'écoute |
-| `MISTRAL_API_KEY` | — | LLM Mistral (prioritaire si défini) |
-| `MISTRAL_MODEL` | `mistral-small-latest` | Modèle Mistral |
-| `OPENAI_API_KEY` | — | LLM OpenAI |
-| `OPENAI_MODEL` | `gpt-4o-mini` | Modèle OpenAI |
-| `OLLAMA_HOST` | `http://localhost:11434` | Serveur Ollama |
-| `OLLAMA_MODEL` | — | Modèle Ollama (ex: `llama3`) |
-| `ADMIN_PASSWORD` | `admin` | Mot de passe interface admin |
-| `REDIS_ENABLED` | `false` | Activer le cache Redis |
-| `REDIS_URL` | `redis://localhost:6379` | URL Redis |
-| `UPLOADS_DIR` | `../uploads` | Répertoire des fichiers uploadés |
-| `MODEL_PATH` | `../models/multilingual-e5-small` | Chemin du modèle ONNX |
+| Variable          | Défaut                                                    | Description                                   |
+| ----------------- | --------------------------------------------------------- | --------------------------------------------- |
+| `ENV`             | `development`                                             | Environnement (`development` ou `production`) |
+| `DATABASE_URL`    | `postgresql://postgres:postgres@localhost:5432/ask-rules` | PostgreSQL                                    |
+| `PORT`            | `3001`                                                    | Port d'écoute (8080 dans Docker)              |
+| `MISTRAL_API_KEY` | —                                                         | LLM Mistral (prioritaire si défini)           |
+| `MISTRAL_MODEL`   | `mistral-small-latest`                                    | Modèle Mistral                                |
+| `OPENAI_API_KEY`  | —                                                         | LLM OpenAI                                    |
+| `OPENAI_MODEL`    | `gpt-4o-mini`                                             | Modèle OpenAI                                 |
+| `OLLAMA_HOST`     | `http://localhost:11434`                                  | Serveur Ollama                                |
+| `OLLAMA_MODEL`    | —                                                         | Modèle Ollama (ex: `llama3`)                  |
+| `ADMIN_PASSWORD`  | `admin`                                                   | Mot de passe interface admin                  |
+| `REDIS_ENABLED`   | `false`                                                   | Activer le cache Redis                        |
+| `REDIS_URL`       | `redis://localhost:6379`                                  | URL Redis                                     |
+| `UPLOADS_DIR`     | `../uploads`                                              | Répertoire des fichiers uploadés              |
+| `MODEL_PATH`      | `../models/multilingual-e5-small`                         | Chemin du modèle ONNX                         |
 
 **Priorité LLM** : Mistral → OpenAI → Ollama. Sans aucune clé, les réponses sont construites uniquement depuis le contexte récupéré (pas de génération).
+
+**Note** : En `ENV=development`, le client Mistral ignore les erreurs TLS (InsecureSkipVerify).
 
 ---
 
@@ -130,7 +155,7 @@ pnpm start              # → http://localhost:3001
 docker build -t ask-rules .
 
 # Lancement
-docker run -p 3001:3001 \
+docker run -p 8080:8080 \
   -e DATABASE_URL=postgres://user:pass@host:5432/db \
   -e MISTRAL_API_KEY=your-key \
   -v ./uploads:/app/uploads \
@@ -145,8 +170,9 @@ services:
     image: ask-rules
     build: .
     ports:
-      - "3001:3001"
+      - '8080:8080'
     environment:
+      ENV: production
       DATABASE_URL: postgres://postgres:postgres@db:5432/ask_rules
       MISTRAL_API_KEY: ${MISTRAL_API_KEY}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
@@ -165,7 +191,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 5s
       retries: 10
 
@@ -174,8 +200,56 @@ volumes:
   uploads:
 ```
 
-> Le schéma PostgreSQL est créé **automatiquement au démarrage** (`db.Migrate()`). Pas besoin de lancer de script `migrate` séparément.
+> Le schéma PostgreSQL est créé **automatiquement au démarrage** via migration idempotente. Pas besoin de script `migrate` séparé.  
 > Le modèle ONNX est intégré dans l'image lors du `docker build` — pas de volume `/app/models` requis.
+
+---
+
+## Features techniques
+
+### Clean Architecture
+
+- **4 couches** : Domain (entities + interfaces) → Application (use cases) → Infrastructure (implémentations) → Interfaces (HTTP)
+- **Dependency Injection** : Repositories et services injectés via constructeurs
+- **Testabilité** : Interfaces mockables, use cases isolés de l'infra
+
+### Chi Router
+
+- Middleware : Logger, Recoverer, RequestID, RealIP, CORS
+- **Timeouts par route** :
+  - POST `/api/ask` : 60s
+  - POST `/api/import` : **pas de timeout** (SSE stream)
+  - GET `/api/games` : 30s
+  - Admin routes : 10s
+  - File serving : 120s
+
+### SSE (Server-Sent Events)
+
+- Import avec **heartbeat 15s** : évite les timeouts proxy/navigateur sur longues importations
+- Thread-safe : `sync.Mutex` sur les envois concurrents
+- Context cancellation : arrêt propre du heartbeat
+- Frontend : ignore les événements `ping`
+
+### Logging
+
+- Format : `[ERROR]` / `[WARN]` avec contexte (handler, use case, game name)
+- **Tous les handlers** : logs à chaque erreur HTTP
+- **Use cases** : logs des erreurs métier (game not found, LLM failure, etc.)
+- Aide au debugging : nom du jeu, opération, erreur originale
+
+### PWA & Service Worker
+
+- Cache-first strategy pour assets statiques
+- **Exclusions** :
+  - Routes `/api/*` → bypass service worker
+  - Header `Accept: text/event-stream` → bypass (SSE)
+- Version : `reglomatic-v2`
+
+### Migration automatique
+
+- Exécutée au démarrage (`db.Migrate()`)
+- Idempotente : `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`
+- Extensions : `pgvector`, `pg_trgm` (full-text search)
 
 ---
 
@@ -183,44 +257,46 @@ volumes:
 
 ### Publique
 
-| Méthode | Route | Description |
-|---|---|---|
-| `POST` | `/api/ask` | Poser une question sur un jeu |
-| `GET` | `/api/games` | Lister les jeux |
-| `GET` | `/api/games/{id}` | Détail d'un jeu |
-| `GET` | `/files/{slug}/{filename}` | Servir un fichier uploadé |
+| Méthode | Route                      | Description                   |
+| ------- | -------------------------- | ----------------------------- |
+| `POST`  | `/api/ask`                 | Poser une question sur un jeu |
+| `GET`   | `/api/games`               | Lister les jeux               |
+| `GET`   | `/api/games/{id}`          | Détail d'un jeu               |
+| `GET`   | `/files/{slug}/{filename}` | Servir un fichier uploadé     |
 
 **Body `/api/ask`** :
+
 ```json
-{ "question": "Comment gagner ?", "jeu": "Catan", "jeu_id": "optional-uuid" }
+{ "question": "Comment gagner ?", "gameName": "Catan" }
 ```
 
 ### Admin (cookie `admin_session` requis)
 
-| Méthode | Route | Description |
-|---|---|---|
-| `POST` | `/api/admin/login` | Connexion |
-| `POST` | `/api/admin/logout` | Déconnexion |
-| `GET` | `/api/admin/check` | Vérifier la session |
-| `GET` | `/api/admin/games` | Lister les jeux |
-| `POST` | `/api/admin/games` | Créer / mettre à jour un jeu |
-| `DELETE` | `/api/admin/games/{id}` | Supprimer un jeu |
-| `GET` | `/api/admin/files` | Lister les fichiers uploadés |
-| `DELETE` | `/api/admin/files/{slug}/{filename}` | Supprimer un fichier |
-| `GET` | `/api/admin/logs` | Logs récents (`?limit=N`) |
-| `POST` | `/api/import` | Importer un fichier (SSE) |
-| `POST` | `/api/admin/reprocess` | Retraiter un jeu (SSE) |
-| `POST` | `/api/admin/reprocess-all` | Retraiter tous les jeux (SSE) |
+| Méthode  | Route                                | Description                   |
+| -------- | ------------------------------------ | ----------------------------- |
+| `POST`   | `/api/admin/login`                   | Connexion                     |
+| `POST`   | `/api/admin/logout`                  | Déconnexion                   |
+| `GET`    | `/api/admin/check`                   | Vérifier la session           |
+| `GET`    | `/api/admin/games`                   | Lister les jeux               |
+| `POST`   | `/api/admin/games`                   | Créer / mettre à jour un jeu  |
+| `DELETE` | `/api/admin/games/{id}`              | Supprimer un jeu              |
+| `GET`    | `/api/admin/files`                   | Lister les fichiers uploadés  |
+| `DELETE` | `/api/admin/files/{slug}/{filename}` | Supprimer un fichier          |
+| `GET`    | `/api/admin/logs`                    | Logs récents (`?limit=N`)     |
+| `POST`   | `/api/import`                        | Importer un fichier (SSE)     |
+| `POST`   | `/api/admin/reprocess`               | Retraiter un jeu (SSE)        |
+| `POST`   | `/api/admin/reprocess-all`           | Retraiter tous les jeux (SSE) |
 
 ---
 
 ## Embeddings
 
-Le module `server/embedder/` charge le modèle **multilingual-e5-small** directement via `onnxruntime_go` (CGO). Aucun serveur Python requis.
+Le service `internal/infrastructure/service/embedder.go` charge le modèle **multilingual-e5-small** directement via `onnxruntime_go` (CGO). Aucun serveur Python requis.
 
 - **Dimensions** : 384
 - **Langue** : multilingue (optimal pour le français)
-- **Session** : tensors pré-alloués, `copy()` avant chaque `Run()` — thread-safe
+- **Session ONNX** : Tensors pré-alloués, `copy()` avant chaque `Run()` — thread-safe
+- **Repository pattern** : Interface `EmbedderService` dans domain, implémentation dans infrastructure
 
 Si `libonnxruntime.so` ou le modèle est absent au démarrage, le serveur continue sans embeddings (recherche full-text uniquement).
 
@@ -228,10 +304,13 @@ Si `libonnxruntime.so` ou le modèle est absent au démarrage, le serveur contin
 
 ## Recherche hybride
 
-`server/retriever/` combine :
+`internal/infrastructure/service/retriever.go` combine :
+
 1. **Recherche vectorielle** — cosinus via `pgvector` (index HNSW)
 2. **Full-text search** — `plainto_tsquery('french', ...)` sur `tsvector` pondéré (titre A, hierarchy_path B, contenu C)
-3. **Fusion RRF** (Reciprocal Rank Fusion) — reclassement des deux listes
+3. **Fusion RRF** (Reciprocal Rank Fusion) — reclassement des deux listes avec `k=60`
+
+Les repositories PostgreSQL gèrent les requêtes SQL (separation of concerns), le retriever orchestre la fusion.
 
 ---
 
