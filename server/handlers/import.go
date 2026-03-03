@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"ask-rules-server/config"
@@ -240,8 +241,12 @@ func ReprocessGame(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
 	if len(filePaths) == 0 && game.FilePath != "" {
-		filePaths = []string{game.FilePath}
+		filePaths = strings.Split(game.FilePath, "+")
+		for i := range filePaths {
+			filePaths[i] = strings.TrimSpace(filePaths[i])
+		}
 	}
 
 	// Vérifier que les fichiers sont accessibles avant de lancer le pipeline
@@ -252,6 +257,7 @@ func ReprocessGame(w http.ResponseWriter, r *http.Request) {
 			missingFiles = append(missingFiles, absPath)
 		}
 	}
+
 	if len(missingFiles) > 0 {
 		send("error", map[string]interface{}{
 			"error": fmt.Sprintf("Fichier(s) introuvable(s) dans %s : %v",
@@ -299,6 +305,7 @@ func ReprocessAll(w http.ResponseWriter, r *http.Request) {
 	// Heartbeat ping toutes les 15 s
 	doneCh2 := make(chan struct{})
 	defer close(doneCh2)
+
 	if flusher != nil {
 		go func() {
 			ticker := time.NewTicker(15 * time.Second)
@@ -358,7 +365,10 @@ func ReprocessAll(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if len(filePaths) == 0 && game.FilePath != "" {
-			filePaths = []string{game.FilePath}
+			filePaths = strings.Split(game.FilePath, "+")
+			for i := range filePaths {
+				filePaths[i] = strings.TrimSpace(filePaths[i])
+			}
 		}
 
 		if len(filePaths) == 0 {
