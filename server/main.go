@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -23,6 +24,10 @@ import (
 var staticFS embed.FS
 
 func main() {
+	// Optimisation RAM : réduire le seuil de GC pour libérer plus souvent
+	// GOGC=50 signifie GC déclenché quand heap augmente de 50% (au lieu de 100%)
+	debug.SetGCPercent(50)
+
 	if err := config.Load(); err != nil {
 		log.Printf("Avertissement config: %v", err)
 	}

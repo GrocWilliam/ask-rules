@@ -29,7 +29,10 @@ import (
 
 const (
 	Dims      = 384
-	MaxTokens = 512
+	MaxTokens = 256 // Réduit de 512 pour économiser RAM (~50% sur tensors)
+	// Note : 256 tokens suffisent pour chunks de 600 caractères
+	// Calcul : 600 chars ÷ 3.5 = ~171 tokens + préfixe "query:" (7) + CLS/SEP (2) = ~180 tokens
+	// Impact précision : < 1% (voir IMPACT_PRECISION.md)
 )
 
 var (
