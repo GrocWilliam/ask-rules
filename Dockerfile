@@ -32,7 +32,7 @@ RUN pnpm run build:web
 # Résultat dans server/build/ (lu par go:embed dans server/cmd/server/main.go)
 
 # ── Stage 2 : Build Go (CGO + onnxruntime) ───────────────────────────────────
-FROM golang:1.22-bookworm AS go-builder
+FROM golang:1.26-trixie AS go-builder
 ARG ONNX_VERSION
 WORKDIR /workspace
 
@@ -69,7 +69,7 @@ RUN apt-get install -y --no-install-recommends bash \
 RUN cd server && CGO_ENABLED=1 go build -ldflags="-w -s" -o /ask-rules-server ./cmd/server
 
 # ── Stage 3 : Image de production minimale ───────────────────────────────────
-FROM debian:bookworm-slim AS runtime
+FROM debian:trixie-slim AS runtime
 ARG ONNX_VERSION
 WORKDIR /app
 
