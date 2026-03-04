@@ -36,13 +36,35 @@ for FILE in "${FILES[@]}"; do
   mkdir -p "$(dirname "${OUT}")"
 
   if [[ -f "${OUT}" ]]; then
-    echo "  ✔ (déjà présent) ${FILE}"
-    continue
+    # Vérifier que les fichiers .json existants sont valides (protection contre cache corrompu)
+    if [[ "${OUT}" == *.json ]]; then
+      FIRST_CHAR=$(head -c1 "${OUT}" 2>/dev/null)
+      if [[ "${FIRST_CHAR}" == "{" || "${FIRST_CHAR}" == "[" ]]; then
+        echo "  ✔ (déjà présent) ${FILE}"
+        continue
+      else
+        echo "  ✖ (corrompu, re-téléchargement) ${FILE}"
+        rm -f "${OUT}"
+      fi
+    else
+      echo "  ✔ (déjà présent) ${FILE}"
+      continue
+    fi
   fi
 
   echo -n "  ↓ ${FILE} ... "
-  if curl --retry 3 --retry-delay 2 -o "${OUT}" "${URL}"; then
+  if curl -fsSL --retry 3 --retry-delay 2 -o "${OUT}" "${URL}"; then
     SIZE=$(du -sh "${OUT}" | cut -f1)
+    # Vérifier que les fichiers .json contiennent du JSON valide
+    if [[ "${OUT}" == *.json ]]; then
+      FIRST_CHAR=$(head -c1 "${OUT}")
+      if [[ "${FIRST_CHAR}" != "{" && "${FIRST_CHAR}" != "[" ]]; then
+        echo "INVALIDE (contenu non-JSON, premier caractère: '${FIRST_CHAR}')"
+        echo "    → Le fichier est probablement une réponse d'erreur HTTP (redirection manquée ?)"
+        rm -f "${OUT}"
+        exit 1
+      fi
+    fi
     echo "${SIZE}"
   else
     echo "ERREUR"
