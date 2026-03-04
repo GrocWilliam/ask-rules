@@ -14,8 +14,8 @@ export default defineConfig({
   plugins: [sveltekit()],
   server: {
     proxy: {
-      '/api': 'http://localhost:3001',
-      '/files': 'http://localhost:3001',
+      '/api': 'http://localhost:8080',
+      '/files': 'http://localhost:8080',
     },
   },
   ssr: {

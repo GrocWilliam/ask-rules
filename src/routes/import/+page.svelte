@@ -80,12 +80,15 @@
           }
 
           // Événements émis par le handler Go
-          if (evt.type === 'start') {
-            steps = [...steps, { message: `Import de « ${evt.jeu} » — ${evt.files} fichier(s)` }];
+          if (evt.type === 'ping') {
+            // Heartbeat pour garder la connexion SSE ouverte - ignorer silencieusement
+            continue;
+          } else if (evt.type === 'start') {
+            steps = [...steps, { message: `Import de « ${evt.game} » — ${evt.files} fichier(s)` }];
           } else if (evt.type === 'replacing') {
             steps = [
               ...steps,
-              { message: `🗑 Sections existantes supprimées pour « ${evt.jeu} »` },
+              { message: `🗑 Sections existantes supprimées pour « ${evt.game} »` },
             ];
           } else if (evt.type === 'uploading') {
             steps = [...steps, { message: `Envoi du fichier : ${evt.file}` }];
@@ -115,7 +118,7 @@
             embedding = null;
             result = {
               ok: true,
-              jeu: evt.jeu as string,
+              jeu: evt.game as string,
               sections: totalChunks,
               action: 'indexé',
               mecaniques: [],
@@ -123,6 +126,7 @@
           } else if (evt.type === 'file_error' || evt.type === 'section_error') {
             steps = [...steps, { message: `⚠ ${evt.error}` }];
           } else if (evt.type === 'error') {
+            console.log(evt);
             result = { ok: false, error: (evt.error ?? evt.message) as string };
           }
         }

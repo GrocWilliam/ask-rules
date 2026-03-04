@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-const CACHE_NAME = 'reglomatic-v1';
+const CACHE_NAME = 'reglomatic-v2'; // Version incrémentée pour forcer la mise à jour
 const OFFLINE_URL = '/';
 
 // Liste des fichiers à mettre en cache lors de l'installation
@@ -57,6 +57,19 @@ self.addEventListener('fetch', (event) => {
 
   // Ignorer les requêtes POST, PUT, DELETE, etc.
   if (event.request.method !== 'GET') {
+    return;
+  }
+
+  // Ignorer les requêtes API (SSE, streaming, JSON dynamique)
+  // Cela évite les problèmes avec Server-Sent Events et les requêtes dynamiques
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/api/')) {
+    return; // Laisser le navigateur gérer directement les requêtes API
+  }
+
+  // Ignorer les requêtes avec Accept: text/event-stream (SSE)
+  const acceptHeader = event.request.headers.get('Accept');
+  if (acceptHeader && acceptHeader.includes('text/event-stream')) {
     return;
   }
 

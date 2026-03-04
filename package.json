@@ -7,7 +7,7 @@
     "dev:front": "vite dev",
     "dev:back": "cd server && air",
     "build:web": "vite build",
-    "build:go": "cd server && go build -o ask-rules-server .",
+    "build:go": "cd server && go build -o ask-rules-server ./cmd/server",
     "download:model": "scripts/download-model.sh",
     "build:all": "[ -f models/multilingual-e5-small/onnx/model.onnx ] || pnpm run download:model && pnpm run build:web && pnpm run build:go",
     "start": "cd server && ./ask-rules-server",
