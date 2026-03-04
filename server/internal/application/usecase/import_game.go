@@ -80,12 +80,13 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 	// Vérifier si le jeu existe déjà
 	existingGame, _ := uc.gameRepo.FindByName(ctx, req.GameName)
 	isNew := existingGame == nil
+	slug := slugify(req.GameName)
 
 	var game *entity.Game
 	if isNew {
 		// Créer un nouveau jeu
 		game = &entity.Game{
-			ID:       generateGameID(req.GameName),
+			ID:       slug,
 			Name:     req.GameName,
 			AddedAt:  time.Now(),
 			Gameplay: make(map[string]interface{}),
@@ -95,7 +96,6 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 	}
 
 	// Sauvegarder les fichiers uploadés
-	slug := slugify(req.GameName)
 	var filePaths []string
 
 	for _, fh := range req.Files {

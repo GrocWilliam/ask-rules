@@ -25,7 +25,7 @@ func NewGameRepository(pool *pgxpool.Pool) repository.GameRepository {
 
 // FindByID retourne un jeu par son ID.
 func (r *GameRepositoryImpl) FindByID(ctx context.Context, id string) (*entity.Game, error) {
-	query := `SELECT id, jeu, fichier, date_ajout, metadata, statistiques, gameplay 
+	query := `SELECT id, jeu, fichier, date_ajout, date_update, metadata, statistiques, gameplay 
 	          FROM games WHERE id = $1`
 
 	var game entity.Game
@@ -34,6 +34,7 @@ func (r *GameRepositoryImpl) FindByID(ctx context.Context, id string) (*entity.G
 		&game.Name,
 		&game.FilePath,
 		&game.AddedAt,
+		&game.UpdatedAt,
 		&game.Metadata,
 		&game.Stats,
 		&game.Gameplay,
@@ -51,7 +52,7 @@ func (r *GameRepositoryImpl) FindByID(ctx context.Context, id string) (*entity.G
 
 // FindByName retourne un jeu par son nom (insensible à la casse).
 func (r *GameRepositoryImpl) FindByName(ctx context.Context, name string) (*entity.Game, error) {
-	query := `SELECT id, jeu, fichier, date_ajout, metadata, statistiques, gameplay 
+	query := `SELECT id, jeu, fichier, date_ajout, date_update, metadata, statistiques, gameplay 
 	          FROM games WHERE LOWER(jeu) = LOWER($1)`
 
 	var game entity.Game
@@ -60,6 +61,7 @@ func (r *GameRepositoryImpl) FindByName(ctx context.Context, name string) (*enti
 		&game.Name,
 		&game.FilePath,
 		&game.AddedAt,
+		&game.UpdatedAt,
 		&game.Metadata,
 		&game.Stats,
 		&game.Gameplay,
@@ -78,11 +80,11 @@ func (r *GameRepositoryImpl) FindByName(ctx context.Context, name string) (*enti
 // List retourne tous les jeux avec leur compte de sections.
 func (r *GameRepositoryImpl) List(ctx context.Context) ([]*entity.GameWithStats, error) {
 	query := `
-		SELECT g.id, g.jeu, g.fichier, g.date_ajout, g.metadata, g.statistiques, g.gameplay, 
+		SELECT g.id, g.jeu, g.fichier, g.date_ajout, g.date_update, g.metadata, g.statistiques, g.gameplay, 
 		       COALESCE(COUNT(s.id), 0) as sections_count
 		FROM games g
 		LEFT JOIN sections s ON g.id = s.game_id
-		GROUP BY g.id, g.jeu, g.fichier, g.date_ajout, g.metadata, g.statistiques, g.gameplay
+		GROUP BY g.id, g.jeu, g.fichier, g.date_ajout, g.date_update, g.metadata, g.statistiques, g.gameplay
 		ORDER BY g.jeu
 	`
 
@@ -100,6 +102,7 @@ func (r *GameRepositoryImpl) List(ctx context.Context) ([]*entity.GameWithStats,
 			&gws.Name,
 			&gws.FilePath,
 			&gws.AddedAt,
+			&gws.UpdatedAt,
 			&gws.Metadata,
 			&gws.Stats,
 			&gws.Gameplay,
@@ -117,14 +120,15 @@ func (r *GameRepositoryImpl) List(ctx context.Context) ([]*entity.GameWithStats,
 // Save crée ou met à jour un jeu.
 func (r *GameRepositoryImpl) Save(ctx context.Context, game *entity.Game) error {
 	query := `
-		INSERT INTO games (id, jeu, fichier, date_ajout, metadata, statistiques, gameplay)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO games (id, jeu, fichier, date_ajout, date_update, metadata, statistiques, gameplay)
+		VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7)
 		ON CONFLICT (id) DO UPDATE SET
-			jeu = EXCLUDED.jeu,
-			fichier = EXCLUDED.fichier,
-			metadata = EXCLUDED.metadata,
+			jeu          = EXCLUDED.jeu,
+			fichier      = EXCLUDED.fichier,
+			date_update  = NOW(),
+			metadata     = EXCLUDED.metadata,
 			statistiques = EXCLUDED.statistiques,
-			gameplay = EXCLUDED.gameplay
+			gameplay     = EXCLUDED.gameplay
 	`
 
 	if game.AddedAt.IsZero() {

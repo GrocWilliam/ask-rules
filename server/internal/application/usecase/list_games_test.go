@@ -48,14 +48,14 @@ func TestListGamesUseCase_Execute_Success(t *testing.T) {
 		t.Fatalf("Expected 2 games, got %d", len(games))
 	}
 
-	if games[0].Name != "Wingspan" || games[0].SectionCount != 10 {
+	if games[0].Name != "Wingspan" || games[0].SectionsCount != 10 {
 		t.Errorf("Expected first game to be 'Wingspan' with 10 sections, got '%s' with %d sections",
-			games[0].Name, games[0].SectionCount)
+			games[0].Name, games[0].SectionsCount)
 	}
 
-	if games[1].Name != "Azul" || games[1].SectionCount != 5 {
+	if games[1].Name != "Azul" || games[1].SectionsCount != 5 {
 		t.Errorf("Expected second game to be 'Azul' with 5 sections, got '%s' with %d sections",
-			games[1].Name, games[1].SectionCount)
+			games[1].Name, games[1].SectionsCount)
 	}
 }
 
