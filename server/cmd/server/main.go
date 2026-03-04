@@ -103,6 +103,8 @@ func main() {
 	// 8. Démarrer le serveur
 	addr := ":" + config.C.Port
 	fmt.Printf("🚀 Server starting on %s\n", addr)
+	fmt.Printf("📂 Uploads dir  : %s\n", config.C.UploadsDir)
+	fmt.Printf("🤖 Model path   : %s\n", config.C.ModelPath)
 	fmt.Printf("📊 Repositories: Game, Section, Log\n")
 	fmt.Printf("🔧 Services: ONNX Embedder, Mistral LLM, Hybrid Retriever, Redis Cache, Pipeline\n")
 	fmt.Printf("📝 Use Cases: Ask, Import, ListGames, GetGame, UpsertGame, DeleteGame, AdminAuth, GetLogs, ManageFiles\n")
