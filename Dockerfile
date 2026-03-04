@@ -6,7 +6,7 @@
 # Construction : docker build -t ask-rules .
 #
 # Lancement :
-#   docker run -p 3001:3001 \
+#   docker run -p 8080:8080 \
 #     -e DATABASE_URL=postgresql://.... \
 #     -e MISTRAL_API_KEY=.... \
 #     ask-rules
@@ -29,7 +29,7 @@ COPY src ./src
 COPY static ./static
 
 RUN pnpm run build:web
-# Résultat dans server/build/ (lu par go:embed dans server/main.go)
+# Résultat dans server/build/ (lu par go:embed dans server/cmd/server/main.go)
 
 # ── Stage 2 : Build Go (CGO + onnxruntime) ───────────────────────────────────
 FROM golang:1.22-bookworm AS go-builder
@@ -66,7 +66,7 @@ RUN apt-get install -y --no-install-recommends bash \
     && bash scripts/download-model.sh models/multilingual-e5-small
 
 # Compilation du binaire (stripped pour réduire la taille)
-RUN cd server && CGO_ENABLED=1 go build -ldflags="-w -s" -o /ask-rules-server .
+RUN cd server && CGO_ENABLED=1 go build -ldflags="-w -s" -o /ask-rules-server ./cmd/server
 
 # ── Stage 3 : Image de production minimale ───────────────────────────────────
 FROM debian:bookworm-slim AS runtime
@@ -104,11 +104,11 @@ RUN mkdir -p uploads
 #   ADMIN_PASSWORD   — mot de passe admin (défaut: admin)
 #   REDIS_ENABLED    — true/false (défaut: false)
 #   REDIS_URL        — ex: redis://redis:6379
-ENV PORT=3001 \
+ENV PORT=8080 \
     MODEL_PATH=/app/models/multilingual-e5-small \
     UPLOADS_DIR=/app/uploads \
     LD_LIBRARY_PATH=/usr/local/lib
 
-EXPOSE 3001
+EXPOSE 8080
 
 CMD ["/app/ask-rules-server"]
