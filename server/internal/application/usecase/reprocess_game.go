@@ -139,17 +139,33 @@ func (uc *ReprocessGameUseCase) Execute(ctx context.Context, req *ReprocessReque
 	return nil
 }
 
-// ExecuteAll relance le pipeline sur tous les jeux existants, un par un.
-func (uc *ReprocessGameUseCase) ExecuteAll(ctx context.Context, emit func(string, map[string]interface{})) {
+// ExecuteAll relance le pipeline sur les jeux sélectionnés (ou tous si gameIDs est vide).
+func (uc *ReprocessGameUseCase) ExecuteAll(ctx context.Context, gameIDs []string, emit func(string, map[string]interface{})) {
 	if emit == nil {
 		emit = func(string, map[string]interface{}) {}
 	}
 
 	// 1. Lister tous les jeux
-	games, err := uc.gameRepo.List(ctx)
+	allGames, err := uc.gameRepo.List(ctx)
 	if err != nil {
 		emit("error", map[string]interface{}{"error": err.Error()})
 		return
+	}
+
+	// 2. Filtrer si une sélection est fournie
+	games := allGames
+	if len(gameIDs) > 0 {
+		idSet := make(map[string]struct{}, len(gameIDs))
+		for _, id := range gameIDs {
+			idSet[id] = struct{}{}
+		}
+		filtered := allGames[:0]
+		for _, gws := range allGames {
+			if _, ok := idSet[gws.Game.ID]; ok {
+				filtered = append(filtered, gws)
+			}
+		}
+		games = filtered
 	}
 
 	total := len(games)

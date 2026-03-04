@@ -240,5 +240,17 @@ func (h *ImportHandler) ReprocessAll(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	log.Printf("[INFO] /api/admin/reprocess-all - Starting reprocess of all games")
-	h.reprocessUseCase.ExecuteAll(ctx, send)
+
+	// Lire les game_ids optionnels depuis le body JSON (tableau vide ou absent = tous les jeux)
+	var body struct {
+		GameIDs []string `json:"game_ids"`
+	}
+	// Ignorer les erreurs de décodage (body vide ou Content-Type absent = tous les jeux)
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	if len(body.GameIDs) > 0 {
+		log.Printf("[INFO] /api/admin/reprocess-all - Filtering to %d game(s): %v", len(body.GameIDs), body.GameIDs)
+	}
+
+	h.reprocessUseCase.ExecuteAll(ctx, body.GameIDs, send)
 }
