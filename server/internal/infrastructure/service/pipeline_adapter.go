@@ -33,9 +33,9 @@ type PipelineAdapter struct {
 }
 
 // NewPipeline crée un nouvel adapter pour le pipeline.
-func NewPipeline(gameRepo repository.GameRepository, sectionRepo repository.SectionRepository) usecase.PipelineService {
+func NewPipeline(gameRepo repository.GameRepository, sectionRepo repository.SectionRepository, embedder service.EmbedderService) usecase.PipelineService {
 	return &PipelineAdapter{
-		embedder:    NewONNXEmbedder(),
+		embedder:    embedder,
 		gameRepo:    gameRepo,
 		sectionRepo: sectionRepo,
 	}
@@ -43,7 +43,12 @@ func NewPipeline(gameRepo repository.GameRepository, sectionRepo repository.Sect
 
 // Process exécute le pipeline d'import.
 func (p *PipelineAdapter) Process(ctx context.Context, opts *usecase.ImportOptions) error {
-	return p.run(ctx, opts.GameName, opts.FilePaths, opts.OnEvent)
+	err := p.run(ctx, opts.GameName, opts.FilePaths, opts.OnEvent)
+	// Libérer le modèle ONNX de la RAM après chaque traitement batch
+	if r, ok := p.embedder.(service.ReleasableEmbedder); ok {
+		r.Release()
+	}
+	return err
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -347,7 +352,7 @@ func extractFirstSentence(s string, maxRunes int) string {
 // ──────────────────────────────────────────────────────────────────────────────
 
 const (
-	defaultChunkSize = 600
+	defaultChunkSize = 1200
 	minChunkSize     = 150
 	minParagraphSize = 40
 )

@@ -53,23 +53,24 @@ func main() {
 	logRepo := postgresRepo.NewLogRepository(pool)
 
 	// 3. Créer les services via adapters
-	_ = infraService.NewONNXEmbedder() // Utilisé dans retriever
+	embedderSvc := infraService.NewONNXEmbedder() // Instance unique — ORT ne peut être initialisé qu'une fois
 	llmSvc := infraService.NewMistralLLM()
 	cacheSvc := infraService.NewRedisCache()
-	retrieverSvc := infraService.NewHybridRetriever(sectionRepo)
-	pipelineSvc := infraService.NewPipeline(gameRepo, sectionRepo)
+	retrieverSvc := infraService.NewHybridRetriever(sectionRepo, embedderSvc)
+	pipelineSvc := infraService.NewPipeline(gameRepo, sectionRepo, embedderSvc)
 
 	// 4. Créer les use cases
 	// Game use cases
-	askUseCase := usecase.NewAskQuestionUseCase(gameRepo, retrieverSvc, llmSvc, cacheSvc)
+	askUseCase := usecase.NewAskQuestionUseCase(gameRepo, retrieverSvc, llmSvc, cacheSvc, logRepo)
 	listGamesUseCase := usecase.NewListGamesUseCase(gameRepo)
 	getGameUseCase := usecase.NewGetGameUseCase(gameRepo)
 	upsertGameUseCase := usecase.NewUpsertGameUseCase(gameRepo)
 	deleteGameUseCase := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo, cacheSvc)
-	importGameUseCase := usecase.NewImportGameUseCase(gameRepo, sectionRepo, pipelineSvc, config.C.UploadsDir)
+	importGameUseCase := usecase.NewImportGameUseCase(gameRepo, sectionRepo, pipelineSvc, config.C.UploadsDir, logRepo)
+	reprocessGameUseCase := usecase.NewReprocessGameUseCase(gameRepo, sectionRepo, pipelineSvc, config.C.UploadsDir, logRepo)
 
 	// Admin use cases
-	adminAuthUseCase := usecase.NewAdminAuthUseCase(config.C.AdminPassword)
+	adminAuthUseCase := usecase.NewAdminAuthUseCase(config.C.AdminPassword, logRepo)
 
 	// Logs use cases
 	getLogsUseCase := usecase.NewGetLogsUseCase(logRepo)
@@ -82,7 +83,7 @@ func main() {
 	// 6. Créer les handlers HTTP
 	askHandler := handler.NewAskHandler(askUseCase)
 	gamesHandler := handler.NewGamesHandler(listGamesUseCase, getGameUseCase, upsertGameUseCase, deleteGameUseCase)
-	importHandler := handler.NewImportHandler(importGameUseCase)
+	importHandler := handler.NewImportHandler(importGameUseCase, reprocessGameUseCase)
 	adminHandler := handler.NewAdminHandler(adminAuthUseCase)
 	logsHandler := handler.NewLogsHandler(getLogsUseCase)
 	filesHandler := handler.NewFilesHandler(listFilesUseCase, deleteFileUseCase, serveFileUseCase)
@@ -116,6 +117,8 @@ func main() {
 	fmt.Printf("  GET    /api/admin/check                      - Check admin session\n")
 	fmt.Printf("  POST   /api/admin/games                      - Create/update game\n")
 	fmt.Printf("  DELETE /api/admin/games/{id}                 - Delete game\n")
+	fmt.Printf("  POST   /api/admin/games/{id}/reprocess        - Reprocess existing game files (SSE)\n")
+	fmt.Printf("  POST   /api/admin/reprocess-all               - Reprocess all games (SSE)\n")
 	fmt.Printf("  GET    /api/admin/logs                       - Get logs\n")
 	fmt.Printf("  GET    /api/admin/files                      - List uploaded files\n")
 	fmt.Printf("  DELETE /api/admin/files/{slug}/{filename}    - Delete file\n")

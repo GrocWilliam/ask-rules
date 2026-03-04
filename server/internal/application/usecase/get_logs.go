@@ -15,6 +15,7 @@ type GetLogsUseCase struct {
 // LogRepository interface pour accéder aux logs.
 type LogRepository interface {
 	GetRecent(ctx context.Context, limit int) ([]*LogEntry, error)
+	Save(ctx context.Context, entry *LogEntry) error
 }
 
 // LogEntry représente une entrée de log.

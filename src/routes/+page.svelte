@@ -8,22 +8,20 @@
   // Résultat de la dernière requête envoyée au Go backend
   type SectionResult = {
     title: string;
-    section_type: string;
-    summary: string;
-    text: string;
+    content: string;
     score: number;
-    page_start: number | null;
+    page_num: number | null;
   };
+
   type FormResult =
     | {
         ok: true;
-        jeu: string;
-        jeu_id: string;
+        game: string;
         answer: string;
-        used_llm: boolean;
         model: string;
         sections: SectionResult[];
         cached: boolean;
+        file_path: string[] | null;
       }
     | { ok: false; error: string }
     | null;
@@ -121,7 +119,15 @@
       if (!res.ok) {
         form = { ok: false, error: data.error ?? 'Erreur serveur' };
       } else {
-        form = data as FormResult;
+        form = {
+          ok: true,
+          game: data.game,
+          answer: data.answer,
+          model: data.model,
+          sections: data.sections,
+          cached: data.cached,
+          file_path: data.file_path,
+        };
       }
     } catch (err) {
       form = { ok: false, error: 'Erreur réseau — vérifiez votre connexion.' };
@@ -261,17 +267,14 @@
         </div>
 
         <!-- Lien(s) de téléchargement du fichier source -->
-        {#if (form as any).file_path}
-          {@const filePaths = ((form as any).file_path as string)
-            .split(' + ')
-            .map((p: string) => p.trim())}
+        {#if form.file_path}
           <div class="file-download">
-            {#each filePaths as filePath, index}
+            {#each form.file_path as filePath, index}
               <a href="/files/{filePath}" class="file-download-link" target="_blank" rel="noopener">
                 <span class="file-icon">📄</span>
                 <span class="file-text">
                   <span class="file-label">
-                    {filePaths.length > 1 ? `Fichier source ${index + 1}` : 'Fichier source'}
+                    {form.file_path.length > 1 ? `Fichier source ${index + 1}` : 'Fichier source'}
                   </span>
                   <span class="file-name">
                     {filePath.split('/').pop()?.replace(/^\d+_/, '') || 'Télécharger'}
@@ -285,7 +288,7 @@
 
         <!-- Réponse LLM -->
         <div class="answer-card">
-          {#if form.used_llm}
+          {#if form.model}
             <div class="answer-header">
               Réponse
               <span class="model-tag">{form.model}</span>
@@ -313,14 +316,14 @@
                 <div class="source-header">
                   <span class="source-title">{s.title}</span>
                   <div class="source-meta">
-                    {#if s.page_start}
-                      <span class="source-page">p.{s.page_start}</span>
+                    {#if s.page_num}
+                      <span class="source-page">p.{s.page_num}</span>
                     {/if}
                     <span class="source-score">{(s.score * 100).toFixed(0)}%</span>
                   </div>
                 </div>
                 <p class="source-text">
-                  {s.summary || s.text.slice(0, 220) + '…'}
+                  {s.content.slice(0, 220) + '…'}
                 </p>
               </div>
             {/each}

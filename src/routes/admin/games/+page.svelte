@@ -182,10 +182,9 @@
     actionMsg = null;
 
     try {
-      const res = await fetch('/api/admin/reprocess', {
+      const res = await fetch(`/api/admin/games/${gameId}/reprocess`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: gameId }),
       });
 
       if (!res.body) throw new Error('Pas de stream SSE');

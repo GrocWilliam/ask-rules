@@ -83,6 +83,10 @@ func NewRouter(cfg *Config) *chi.Mux {
 				r.With(middleware.Timeout(30*time.Second)).Post("/games", cfg.GamesHandler.Upsert)
 				r.With(middleware.Timeout(30*time.Second)).Delete("/games/{id}", cfg.GamesHandler.Delete)
 
+				// Reprocess (SSE - sans timeout)
+				r.Post("/games/{id}/reprocess", cfg.ImportHandler.Reprocess)
+				r.Post("/reprocess-all", cfg.ImportHandler.ReprocessAll)
+
 				// Logs (avec timeout)
 				r.With(middleware.Timeout(30*time.Second)).Get("/logs", cfg.LogsHandler.Get)
 

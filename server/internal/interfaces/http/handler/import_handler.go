@@ -10,18 +10,21 @@ import (
 	"time"
 
 	"ask-rules-server/internal/application/usecase"
+
+	"github.com/go-chi/chi/v5"
 )
 
 const maxUploadSize = 50 << 20 // 50 MB
 
 // ImportHandler gère les requêtes HTTP pour l'import de jeux.
 type ImportHandler struct {
-	importUseCase *usecase.ImportGameUseCase
+	importUseCase    *usecase.ImportGameUseCase
+	reprocessUseCase *usecase.ReprocessGameUseCase
 }
 
 // NewImportHandler crée un nouveau handler.
-func NewImportHandler(importUseCase *usecase.ImportGameUseCase) *ImportHandler {
-	return &ImportHandler{importUseCase: importUseCase}
+func NewImportHandler(importUseCase *usecase.ImportGameUseCase, reprocessUseCase *usecase.ReprocessGameUseCase) *ImportHandler {
+	return &ImportHandler{importUseCase: importUseCase, reprocessUseCase: reprocessUseCase}
 }
 
 // Import traite les requêtes POST /api/import avec Server-Sent Events.
@@ -131,4 +134,111 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 		sendError(err.Error())
 		return
 	}
+}
+
+// Reprocess traite les requêtes POST /api/admin/games/{id}/reprocess avec Server-Sent Events.
+func (h *ImportHandler) Reprocess(w http.ResponseWriter, r *http.Request) {
+	// Configurer SSE
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "SSE not supported", http.StatusInternalServerError)
+		return
+	}
+
+	var sendMu sync.Mutex
+	send := func(eventType string, data map[string]interface{}) {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		merged := map[string]interface{}{"type": eventType}
+		for k, v := range data {
+			merged[k] = v
+		}
+		b, _ := json.Marshal(merged)
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+	}
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				send("ping", map[string]interface{}{"timestamp": time.Now().Unix()})
+			}
+		}
+	}()
+
+	gameID := chi.URLParam(r, "id")
+	if gameID == "" {
+		send("error", map[string]interface{}{"error": "Missing game ID"})
+		return
+	}
+
+	req := &usecase.ReprocessRequest{
+		GameID:  gameID,
+		OnEvent: send,
+	}
+
+	if err := h.reprocessUseCase.Execute(r.Context(), req); err != nil {
+		log.Printf("[ERROR] /api/admin/games/%s/reprocess - Failed: %v", gameID, err)
+		send("error", map[string]interface{}{"error": err.Error()})
+		return
+	}
+}
+
+// ReprocessAll traite les requêtes POST /api/admin/reprocess-all avec Server-Sent Events.
+func (h *ImportHandler) ReprocessAll(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "SSE not supported", http.StatusInternalServerError)
+		return
+	}
+
+	var sendMu sync.Mutex
+	send := func(eventType string, data map[string]interface{}) {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		merged := map[string]interface{}{"type": eventType}
+		for k, v := range data {
+			merged[k] = v
+		}
+		b, _ := json.Marshal(merged)
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+	}
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				send("ping", map[string]interface{}{"timestamp": time.Now().Unix()})
+			}
+		}
+	}()
+
+	log.Printf("[INFO] /api/admin/reprocess-all - Starting reprocess of all games")
+	h.reprocessUseCase.ExecuteAll(ctx, send)
 }

@@ -21,6 +21,7 @@ type AskQuestionUseCase struct {
 	retriever service.RetrieverService
 	llm       service.LLMService
 	cache     service.CacheService
+	logRepo   LogRepository
 }
 
 // NewAskQuestionUseCase crée un nouveau use case.
@@ -29,12 +30,14 @@ func NewAskQuestionUseCase(
 	retriever service.RetrieverService,
 	llm service.LLMService,
 	cache service.CacheService,
+	logRepo LogRepository,
 ) *AskQuestionUseCase {
 	return &AskQuestionUseCase{
 		gameRepo:  gameRepo,
 		retriever: retriever,
 		llm:       llm,
 		cache:     cache,
+		logRepo:   logRepo,
 	}
 }
 
@@ -51,6 +54,7 @@ type AskResponse struct {
 	Model    string              `json:"model"`
 	Sections []*RetrievedSection `json:"sections"`
 	Cached   bool                `json:"cached"`
+	FilePath []string            `json:"file_path"`
 }
 
 // RetrievedSection représente une section récupérée pour la réponse.
@@ -100,8 +104,9 @@ func (uc *AskQuestionUseCase) Execute(ctx context.Context, req *AskRequest) (*As
 	sections, err := uc.retriever.Search(ctx, &service.SearchRequest{
 		GameID:   game.ID,
 		Question: req.Question,
-		Limit:    5, // Top 5 sections
+		Limit:    6,
 	})
+
 	if err != nil {
 		log.Printf("[ERROR] AskQuestion - Failed to search sections for game '%s': %v", game.Name, err)
 		return nil, fmt.Errorf("failed to search sections: %w", err)
@@ -129,10 +134,33 @@ func (uc *AskQuestionUseCase) Execute(ctx context.Context, req *AskRequest) (*As
 		Model:    llmResponse.Model,
 		Sections: uc.mapSections(sections),
 		Cached:   false,
+		FilePath: toStringSlice(game.Stats["files"]),
 	}
 
 	// 8. Mettre en cache
 	_ = uc.cache.Set(ctx, cacheKey, response)
+
+	// 9. Logger la question en base de données
+	if uc.logRepo != nil {
+		metadata := map[string]interface{}{
+			"game":     game.Name,
+			"question": req.Question,
+			"model":    llmResponse.Model,
+		}
+		if llmResponse.TokensUsed != nil {
+			metadata["tokens_input"] = llmResponse.TokensUsed.Input
+			metadata["tokens_output"] = llmResponse.TokensUsed.Output
+			metadata["tokens_total"] = llmResponse.TokensUsed.Total
+		}
+		entry := &LogEntry{
+			EventType: "ask_question",
+			Message:   fmt.Sprintf("Question sur le jeu '%s'", game.Name),
+			Metadata:  metadata,
+		}
+		if err := uc.logRepo.Save(ctx, entry); err != nil {
+			log.Printf("[WARN] AskQuestion - Failed to save log: %v", err)
+		}
+	}
 
 	return response, nil
 }

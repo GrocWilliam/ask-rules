@@ -17,9 +17,9 @@ type HybridRetrieverAdapter struct {
 }
 
 // NewHybridRetriever crée un nouvel adapter pour le retriever hybride.
-func NewHybridRetriever(sectionRepo repository.SectionRepository) service.RetrieverService {
+func NewHybridRetriever(sectionRepo repository.SectionRepository, embedder service.EmbedderService) service.RetrieverService {
 	return &HybridRetrieverAdapter{
-		embedder:    NewONNXEmbedder(),
+		embedder:    embedder,
 		sectionRepo: sectionRepo,
 	}
 }
