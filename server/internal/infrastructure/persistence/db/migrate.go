@@ -47,6 +47,11 @@ func Migrate(ctx context.Context) error {
 			`ALTER TABLE games
 				ADD COLUMN IF NOT EXISTS gameplay JSONB NOT NULL DEFAULT '{}'`,
 		},
+		{
+			"colonne date_update",
+			`ALTER TABLE games
+				ADD COLUMN IF NOT EXISTS date_update TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
+		},
 
 		// ── Table sections ────────────────────────────────────────────────────
 		{

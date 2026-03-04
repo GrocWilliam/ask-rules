@@ -2,16 +2,12 @@
 package usecase
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"strings"
 )
 
-// generateGameID génère un ID unique pour un jeu.
+// generateGameID génère l'ID d'un jeu à partir de son nom (slug stable et lisible).
 func generateGameID(name string) string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return slugify(name) + "-" + hex.EncodeToString(b)
+	return slugify(name)
 }
 
 // slugify convertit un texte en slug.

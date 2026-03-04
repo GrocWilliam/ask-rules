@@ -449,6 +449,12 @@
           <span class="label">Date d'ajout:</span>
           <span class="value">{formatDate(game.added_at)}</span>
         </div>
+        {#if game.updated_at && game.updated_at !== game.added_at}
+          <div class="info-row">
+            <span class="label">Mis à jour:</span>
+            <span class="value">{formatDate(game.updated_at)}</span>
+          </div>
+        {/if}
         {#if game.stats?.pageCount}
           <div class="info-row">
             <span class="label">Pages:</span>
