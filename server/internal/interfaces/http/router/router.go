@@ -2,6 +2,7 @@
 package router
 
 import (
+	"io/fs"
 	"net/http"
 	"time"
 
@@ -23,6 +24,9 @@ type Config struct {
 	LogsHandler      *handler.LogsHandler
 	FilesHandler     *handler.FilesHandler
 	AdminAuthUseCase *usecase.AdminAuthUseCase
+	// StaticFS contient le front-end SvelteKit embarqué (go:embed build/).
+	// Si nil, le front-end n'est pas servi (mode développement local).
+	StaticFS fs.FS
 }
 
 // NewRouter crée et configure un nouveau routeur Chi.
@@ -106,6 +110,32 @@ func NewRouter(cfg *Config) *chi.Mux {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
+
+	// ── Front-end SvelteKit (SPA fallback) ────────────────────────────────────
+	// Toutes les routes non-API renvoient index.html pour le routing côté client.
+	// Les assets statiques (_app/, favicon, etc.) sont servis directement.
+	if cfg.StaticFS != nil {
+		fileServer := http.FileServer(http.FS(cfg.StaticFS))
+		r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+			// Retirer le '/' initial ; la racine devient ""
+			path := req.URL.Path
+			if len(path) > 0 && path[0] == '/' {
+				path = path[1:]
+			}
+			if path == "" {
+				path = "index.html"
+			}
+			// Tenter de servir le fichier tel quel
+			f, err := cfg.StaticFS.Open(path)
+			if err == nil {
+				f.Close()
+				fileServer.ServeHTTP(w, req)
+				return
+			}
+			// Fichier inconnu → index.html (SPA client-side routing)
+			http.ServeFileFS(w, req, cfg.StaticFS, "index.html")
+		})
+	}
 
 	return r
 }
