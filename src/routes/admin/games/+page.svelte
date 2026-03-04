@@ -39,6 +39,28 @@
   let reprocessAllCurrentGame = '';
   let reprocessAllEmbedding: { current: number; total: number } | null = null;
 
+  // ── Sélection de jeux pour le recalcul ────────────────────────────────────
+  let selectedGameIDs = new Set<string>();
+
+  function toggleGameSelection(id: string) {
+    if (selectedGameIDs.has(id)) {
+      selectedGameIDs.delete(id);
+    } else {
+      selectedGameIDs.add(id);
+    }
+    selectedGameIDs = new Set(selectedGameIDs); // déclencher la réactivité Svelte
+  }
+
+  function selectAllGames() {
+    selectedGameIDs = new Set(data.games.map((g: any) => g.id));
+  }
+
+  function selectNoGames() {
+    selectedGameIDs = new Set();
+  }
+
+  $: selectedCount = selectedGameIDs.size;
+
   async function reprocessAll() {
     reprocessAllActive = true;
     reprocessAllDone = false;
@@ -50,8 +72,17 @@
     reprocessAllCurrentGame = '';
     reprocessAllEmbedding = null;
 
+    // Jeux ciblés : sélection explicite ou tous
+    const targetIDs = selectedCount > 0 ? [...selectedGameIDs] : [];
+    const targetGames =
+      targetIDs.length > 0 ? data.games.filter((g: any) => targetIDs.includes(g.id)) : data.games;
+
     try {
-      const res = await fetch('/api/admin/reprocess-all', { method: 'POST' });
+      const res = await fetch('/api/admin/reprocess-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game_ids: targetIDs }),
+      });
       if (!res.body) throw new Error('Pas de stream SSE');
 
       const reader = res.body.getReader();
@@ -78,7 +109,7 @@
 
           if (t === 'start') {
             reprocessAllTotal = evt.total as number;
-            reprocessAllGameList = data.games.map((g: any) => ({
+            reprocessAllGameList = targetGames.map((g: any) => ({
               name: g.name,
               status: 'pending' as const,
             }));
@@ -275,9 +306,19 @@
     <p class="summary">{data.games?.length ?? 0} jeu(x) dans la base</p>
   </div>
   <div class="header-actions">
+    <div class="selection-controls">
+      <button class="btn-link" on:click={selectAllGames} disabled={reprocessAllActive}>Tout</button>
+      <span class="sep">·</span>
+      <button class="btn-link" on:click={selectNoGames} disabled={reprocessAllActive}>Aucun</button>
+      {#if selectedCount > 0}
+        <span class="selection-badge">{selectedCount} sélectionné(s)</span>
+      {/if}
+    </div>
     <button class="btn btn-warning" on:click={reprocessAll} disabled={reprocessAllActive}>
       {#if reprocessAllActive}
         <span class="spinner-small" aria-hidden="true"></span>Recalcul en cours...
+      {:else if selectedCount > 0}
+        🔄 Recalculer ({selectedCount})
       {:else}
         🔄 Tout recalculer
       {/if}
@@ -430,8 +471,15 @@
 
 <div class="games-grid">
   {#each data.games as game}
-    <div class="game-card">
+    <div class="game-card" class:selected={selectedGameIDs.has(game.id)}>
       <div class="game-header">
+        <label class="game-select-label" title="Sélectionner pour le recalcul">
+          <input
+            type="checkbox"
+            checked={selectedGameIDs.has(game.id)}
+            on:change={() => toggleGameSelection(game.id)}
+          />
+        </label>
         <h2>{game.name}</h2>
         <span class="badge">{game.sections_count} sections</span>
       </div>
@@ -584,6 +632,67 @@
 
   .game-card:hover {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  .game-card.selected {
+    border-color: #4f46e5;
+    box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.25);
+  }
+
+  .game-select-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .game-select-label input[type='checkbox'] {
+    width: 1.1rem;
+    height: 1.1rem;
+    cursor: pointer;
+    accent-color: #4f46e5;
+  }
+
+  .selection-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.875rem;
+    color: #555;
+  }
+
+  .btn-link {
+    background: none;
+    border: none;
+    color: #4f46e5;
+    cursor: pointer;
+    padding: 0;
+    font-size: 0.875rem;
+    text-decoration: underline;
+  }
+
+  .btn-link:hover {
+    color: #3730a3;
+  }
+
+  .btn-link:disabled {
+    color: #aaa;
+    cursor: not-allowed;
+    text-decoration: none;
+  }
+
+  .sep {
+    color: #ccc;
+  }
+
+  .selection-badge {
+    background: #4f46e5;
+    color: white;
+    padding: 0.1rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.25rem;
   }
 
   .game-header {
