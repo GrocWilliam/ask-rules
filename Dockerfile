@@ -29,7 +29,7 @@ COPY src ./src
 COPY static ./static
 
 RUN pnpm run build:web
-# Résultat dans server/build/ (lu par go:embed dans server/cmd/server/main.go)
+# Résultat dans server/cmd/server/build/ (embarqué via go:embed dans static.go)
 
 # ── Stage 2 : Build Go (CGO + onnxruntime) ───────────────────────────────────
 FROM golang:1.26-trixie AS go-builder
@@ -55,9 +55,9 @@ RUN curl -fsSL \
 COPY server/go.mod server/go.sum ./server/
 RUN cd server && go mod download
 
-# Code source Go + artefacts SvelteKit (go:embed server/build)
+# Code source Go + artefacts SvelteKit (go:embed cmd/server/build)
 COPY server ./server
-COPY --from=web-builder /workspace/server/build ./server/build
+COPY --from=web-builder /workspace/server/cmd/server/build ./server/cmd/server/build
 
 # Téléchargement du modèle ONNX (intégré dans l'image, pas de volume requis)
 COPY scripts/download-model.sh ./scripts/download-model.sh

@@ -97,6 +97,7 @@ func main() {
 		LogsHandler:      logsHandler,
 		FilesHandler:     filesHandler,
 		AdminAuthUseCase: adminAuthUseCase,
+		StaticFS:         staticFS(),
 	})
 
 	// 8. Démarrer le serveur
