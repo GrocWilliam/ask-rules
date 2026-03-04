@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"strings"
 	"time"
 
 	"ask-rules-server/internal/domain/entity"
@@ -60,8 +61,18 @@ func (uc *ReprocessGameUseCase) Execute(ctx context.Context, req *ReprocessReque
 		return fmt.Errorf("failed to find game: %w", err)
 	}
 
-	// 2. Récupérer les chemins de fichiers depuis les stats
+	// 2. Récupérer les chemins de fichiers depuis les stats (nouveau format)
+	// ou depuis la colonne `fichier` séparés par `+` (ancien format).
 	filePaths := toStringSlice(game.Stats["files"])
+	needsMigration := false
+	if len(filePaths) == 0 && game.FilePath != "" {
+		for _, p := range strings.Split(game.FilePath, "+") {
+			if s := strings.TrimSpace(p); s != "" {
+				filePaths = append(filePaths, s)
+			}
+		}
+		needsMigration = len(filePaths) > 0
+	}
 	if len(filePaths) == 0 {
 		return fmt.Errorf("no files found for game '%s'", game.Name)
 	}
@@ -92,6 +103,19 @@ func (uc *ReprocessGameUseCase) Execute(ctx context.Context, req *ReprocessReque
 	runtime.GC()
 
 	duration := time.Since(start)
+
+	// Migrer vers le nouveau format si les fichiers venaient de l'ancienne colonne `fichier`
+	if needsMigration {
+		if game.Stats == nil {
+			game.Stats = make(map[string]interface{})
+		}
+		game.Stats["files"] = filePaths
+		if err := uc.gameRepo.Save(ctx, game); err != nil {
+			log.Printf("[WARN] ReprocessGame - Failed to migrate stats.files for game '%s': %v", game.Name, err)
+		} else {
+			log.Printf("[INFO] ReprocessGame - Migrated stats.files for game '%s' (%d file(s))", game.Name, len(filePaths))
+		}
+	}
 
 	// Logger le reprocess en base de données
 	if uc.logRepo != nil {
@@ -150,6 +174,15 @@ func (uc *ReprocessGameUseCase) ExecuteAll(ctx context.Context, emit func(string
 		})
 
 		filePaths := toStringSlice(game.Stats["files"])
+		gamNeedsMigration := false
+		if len(filePaths) == 0 && game.FilePath != "" {
+			for _, p := range strings.Split(game.FilePath, "+") {
+				if s := strings.TrimSpace(p); s != "" {
+					filePaths = append(filePaths, s)
+				}
+			}
+			gamNeedsMigration = len(filePaths) > 0
+		}
 		if len(filePaths) == 0 {
 			emit("game_error", map[string]interface{}{
 				"game":  game.Name,
@@ -185,6 +218,15 @@ func (uc *ReprocessGameUseCase) ExecuteAll(ctx context.Context, emit func(string
 		}
 
 		successes++
+		if gamNeedsMigration {
+			if game.Stats == nil {
+				game.Stats = make(map[string]interface{})
+			}
+			game.Stats["files"] = filePaths
+			if err := uc.gameRepo.Save(ctx, game); err != nil {
+				log.Printf("[WARN] ReprocessAll - Failed to migrate stats.files for '%s': %v", game.Name, err)
+			}
+		}
 		emit("game_done", map[string]interface{}{"game": game.Name})
 		runtime.GC()
 	}
