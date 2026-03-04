@@ -23,13 +23,15 @@ type AdminAuthUseCase struct {
 	adminPassword string
 	sessions      map[string]time.Time
 	mu            sync.RWMutex
+	logRepo       LogRepository
 }
 
 // NewAdminAuthUseCase crée un nouveau use case.
-func NewAdminAuthUseCase(adminPassword string) *AdminAuthUseCase {
+func NewAdminAuthUseCase(adminPassword string, logRepo LogRepository) *AdminAuthUseCase {
 	uc := &AdminAuthUseCase{
 		adminPassword: adminPassword,
 		sessions:      make(map[string]time.Time),
+		logRepo:       logRepo,
 	}
 
 	// Nettoyage périodique des sessions expirées
@@ -52,6 +54,12 @@ type LoginResponse struct {
 // Login vérifie le mot de passe et crée une session.
 func (uc *AdminAuthUseCase) Login(ctx context.Context, req *LoginRequest) (*LoginResponse, error) {
 	if req.Password != uc.adminPassword {
+		if uc.logRepo != nil {
+			_ = uc.logRepo.Save(ctx, &LogEntry{
+				EventType: "admin_login_failed",
+				Message:   "Tentative de connexion admin échouée",
+			})
+		}
 		return nil, ErrInvalidPassword
 	}
 
@@ -62,6 +70,13 @@ func (uc *AdminAuthUseCase) Login(ctx context.Context, req *LoginRequest) (*Logi
 	uc.mu.Lock()
 	uc.sessions[token] = expires
 	uc.mu.Unlock()
+
+	if uc.logRepo != nil {
+		_ = uc.logRepo.Save(ctx, &LogEntry{
+			EventType: "admin_login",
+			Message:   "Connexion admin réussie",
+		})
+	}
 
 	return &LoginResponse{
 		Token:   token,

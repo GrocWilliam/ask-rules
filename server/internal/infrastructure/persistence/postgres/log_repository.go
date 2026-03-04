@@ -52,3 +52,13 @@ func (r *LogRepositoryImpl) GetRecent(ctx context.Context, limit int) ([]*usecas
 
 	return logs, rows.Err()
 }
+
+// Save insère une nouvelle entrée de log.
+func (r *LogRepositoryImpl) Save(ctx context.Context, entry *usecase.LogEntry) error {
+	query := `
+		INSERT INTO logs (event_type, message, metadata)
+		VALUES ($1, $2, $3)
+	`
+	_, err := r.pool.Exec(ctx, query, entry.EventType, entry.Message, entry.Metadata)
+	return err
+}

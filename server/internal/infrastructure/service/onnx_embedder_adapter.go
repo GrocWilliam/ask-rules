@@ -8,27 +8,46 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 
-	"ask-rules-server/internal/infrastructure/config"
 	"ask-rules-server/internal/domain/service"
+	"ask-rules-server/internal/infrastructure/config"
 
 	ort "github.com/yalue/onnxruntime_go"
 )
 
 const (
-	embeddingDims      = 384
-	maxTokens          = 256 // Réduit de 512 pour économiser RAM (~50% sur tensors)
+	embeddingDims = 384
+	maxTokens     = 256 // Réduit de 512 pour économiser RAM (~50% sur tensors)
 )
+
+// ortEnvOnce garantit que InitializeEnvironment n'est appelé qu'une seule fois
+// dans tout le processus (contrainte globale libbonnxruntime).
+var (
+	ortEnvOnce sync.Once
+	ortEnvErr  error
+)
+
+func initOrtEnv(libPath string) error {
+	ortEnvOnce.Do(func() {
+		ort.SetSharedLibraryPath(libPath)
+		ortEnvErr = ort.InitializeEnvironment()
+	})
+	return ortEnvErr
+}
 
 // ONNXEmbedderAdapter implémente EmbedderService avec ONNX Runtime.
 type ONNXEmbedderAdapter struct {
-	once  sync.Once
-	ortMu sync.Mutex
+	initMu  sync.Mutex // protège initialized + session/tensors
+	ortMu   sync.Mutex // protège les appels Run()
+	timerMu sync.Mutex // protège idleTimer uniquement
 
 	// vocab : token → ID (position dans le tableau Unigram)
 	vocab map[string]int32
@@ -37,6 +56,7 @@ type ONNXEmbedderAdapter struct {
 	unkID       int32
 	clsID       int32
 	sepID       int32
+	vocabLoaded bool // le tokenizer est chargé une seule fois (léger)
 
 	session *ort.AdvancedSession
 
@@ -48,124 +68,203 @@ type ONNXEmbedderAdapter struct {
 
 	initialized bool
 	persistErr  error // erreur d'init conservée pour les appels suivants
+
+	// Timer d'inactivité : libère la session/tensors après idleTimeout sans appel Embed.
+	idleTimer   *time.Timer
+	idleTimeout time.Duration
 }
 
 // NewONNXEmbedder crée un nouvel adapter pour l'embedder ONNX.
+// Le modèle est libéré automatiquement après 1 minute d'inactivité.
 func NewONNXEmbedder() service.EmbedderService {
 	return &ONNXEmbedderAdapter{
-		unkID: 3, // <unk> dans multilingual-e5-small
-		clsID: 0, // <s>
-		sepID: 2, // </s>
+		unkID:       3, // <unk> dans multilingual-e5-small
+		clsID:       0, // <s>
+		sepID:       2, // </s>
+		idleTimeout: time.Minute * 5,
 	}
 }
 
-// Init charge le modèle ONNX et le vocabulaire.
-func (e *ONNXEmbedderAdapter) Init() error {
-	e.once.Do(func() {
-		modelDir := config.C.ModelPath
+// resetIdleTimer (re)démarre le timer d'inactivité.
+// Doit être appelé AVANT d'acquérir ortMu ou initMu pour éviter
+// toute inversion de verrous avec Release().
+func (e *ONNXEmbedderAdapter) resetIdleTimer() {
+	e.timerMu.Lock()
+	defer e.timerMu.Unlock()
+	if e.idleTimer != nil {
+		e.idleTimer.Stop()
+	}
+	e.idleTimer = time.AfterFunc(e.idleTimeout, func() {
+		log.Printf("[INFO] ONNXEmbedder - Inactivité %s, libération de la RAM", e.idleTimeout)
+		e.Release()
+	})
+}
 
-		// Chargement du tokenizer.json (Unigram SentencePiece)
+// Init charge la session ONNX et les tensors.
+// Le tokenizer est chargé une seule fois ; la session peut être recréée après Release().
+func (e *ONNXEmbedderAdapter) Init() error {
+	e.initMu.Lock()
+	defer e.initMu.Unlock()
+
+	if e.initialized {
+		return nil
+	}
+
+	modelDir := config.C.ModelPath
+
+	// Charger le tokenizer seulement si nécessaire (survivrait à une Release)
+	if !e.vocabLoaded {
 		tokPath := filepath.Join(modelDir, "tokenizer.json")
 		var loadErr error
 		e.vocab, e.vocabScores, e.clsID, e.sepID, e.unkID, loadErr = e.loadTokenizer(tokPath)
 		if loadErr != nil {
 			e.persistErr = fmt.Errorf("chargement tokenizer depuis %s : %w", tokPath, loadErr)
-			return
+			return e.persistErr
 		}
+		e.vocabLoaded = true
+	}
 
-		// Initialisation ONNX Runtime
-		ort.SetSharedLibraryPath(e.findOrtLib())
-		if err := ort.InitializeEnvironment(); err != nil {
-			e.persistErr = fmt.Errorf("init ORT : %w", err)
-			return
-		}
+	// Initialisation ORT globale (no-op si déjà faite)
+	if err := initOrtEnv(e.findOrtLib()); err != nil {
+		e.persistErr = fmt.Errorf("init ORT : %w", err)
+		return e.persistErr
+	}
 
-		// Cherche le fichier modèle (quantized en priorité, puis onnx/ sous-répertoire)
-		modelCandidates := []string{
-			filepath.Join(modelDir, "model_quantized.onnx"),
-			filepath.Join(modelDir, "onnx", "model_quantized.onnx"),
-			filepath.Join(modelDir, "model.onnx"),
-			filepath.Join(modelDir, "onnx", "model.onnx"),
+	// Cherche le fichier modèle (quantized en priorité, puis onnx/ sous-répertoire)
+	modelCandidates := []string{
+		filepath.Join(modelDir, "model_quantized.onnx"),
+		filepath.Join(modelDir, "onnx", "model_quantized.onnx"),
+		filepath.Join(modelDir, "model.onnx"),
+		filepath.Join(modelDir, "onnx", "model.onnx"),
+	}
+	modelPath := ""
+	for _, c := range modelCandidates {
+		if _, err := os.Stat(c); err == nil {
+			modelPath = c
+			break
 		}
-		modelPath := ""
-		for _, c := range modelCandidates {
-			if _, err := os.Stat(c); err == nil {
-				modelPath = c
-				break
-			}
-		}
-		if modelPath == "" {
-			e.persistErr = fmt.Errorf("fichier modèle ONNX introuvable dans %s", modelDir)
-			return
-		}
+	}
+	if modelPath == "" {
+		e.persistErr = fmt.Errorf("fichier modèle ONNX introuvable dans %s", modelDir)
+		return e.persistErr
+	}
 
-		// Création de la session ONNX
-		options, err := ort.NewSessionOptions()
-		if err != nil {
-			e.persistErr = fmt.Errorf("options ORT : %w", err)
-			return
-		}
-		defer options.Destroy()
+	// Création de la session ONNX
+	options, err := ort.NewSessionOptions()
+	if err != nil {
+		e.persistErr = fmt.Errorf("options ORT : %w", err)
+		return e.persistErr
+	}
+	defer options.Destroy()
 
-		inputNames := []string{"input_ids", "attention_mask", "token_type_ids"}
-		outputNames := []string{"last_hidden_state"}
+	inputNames := []string{"input_ids", "attention_mask", "token_type_ids"}
+	outputNames := []string{"last_hidden_state"}
 
-		// Tensors pré-alloués — réutilisés à chaque Run()
-		e.inIDs, err = ort.NewEmptyTensor[int64](ort.NewShape(1, maxTokens))
-		if err != nil {
-			e.persistErr = fmt.Errorf("tensor input_ids : %w", err)
-			return
-		}
-		e.inMask, err = ort.NewEmptyTensor[int64](ort.NewShape(1, maxTokens))
-		if err != nil {
-			e.persistErr = fmt.Errorf("tensor attention_mask : %w", err)
-			return
-		}
-		e.inTypes, err = ort.NewEmptyTensor[int64](ort.NewShape(1, maxTokens))
-		if err != nil {
-			e.persistErr = fmt.Errorf("tensor token_type_ids : %w", err)
-			return
-		}
-		e.outTensor, err = ort.NewEmptyTensor[float32](ort.NewShape(1, maxTokens, embeddingDims))
-		if err != nil {
-			e.persistErr = fmt.Errorf("tensor output : %w", err)
-			return
-		}
+	// Tensors pré-alloués — réutilisés à chaque Run()
+	e.inIDs, err = ort.NewEmptyTensor[int64](ort.NewShape(1, maxTokens))
+	if err != nil {
+		e.persistErr = fmt.Errorf("tensor input_ids : %w", err)
+		return e.persistErr
+	}
+	e.inMask, err = ort.NewEmptyTensor[int64](ort.NewShape(1, maxTokens))
+	if err != nil {
+		e.persistErr = fmt.Errorf("tensor attention_mask : %w", err)
+		return e.persistErr
+	}
+	e.inTypes, err = ort.NewEmptyTensor[int64](ort.NewShape(1, maxTokens))
+	if err != nil {
+		e.persistErr = fmt.Errorf("tensor token_type_ids : %w", err)
+		return e.persistErr
+	}
+	e.outTensor, err = ort.NewEmptyTensor[float32](ort.NewShape(1, maxTokens, embeddingDims))
+	if err != nil {
+		e.persistErr = fmt.Errorf("tensor output : %w", err)
+		return e.persistErr
+	}
 
+	e.session, err = ort.NewAdvancedSession(modelPath,
+		inputNames, outputNames,
+		[]ort.Value{e.inIDs, e.inMask, e.inTypes},
+		[]ort.Value{e.outTensor},
+		options)
+	if err != nil {
+		// XLM-RoBERTa n'a pas de token_type_ids : réessayer sans
+		inputNames = []string{"input_ids", "attention_mask"}
+		e.inTypes.Destroy()
+		e.inTypes = nil
 		e.session, err = ort.NewAdvancedSession(modelPath,
 			inputNames, outputNames,
-			[]ort.Value{e.inIDs, e.inMask, e.inTypes},
+			[]ort.Value{e.inIDs, e.inMask},
 			[]ort.Value{e.outTensor},
 			options)
 		if err != nil {
-			// XLM-RoBERTa n'a pas de token_type_ids : réessayer sans
-			inputNames = []string{"input_ids", "attention_mask"}
-			e.inTypes.Destroy()
-			e.inTypes = nil
-			e.session, err = ort.NewAdvancedSession(modelPath,
-				inputNames, outputNames,
-				[]ort.Value{e.inIDs, e.inMask},
-				[]ort.Value{e.outTensor},
-				options)
-			if err != nil {
-				e.persistErr = fmt.Errorf("création session ORT : %w", err)
-				return
-			}
+			e.persistErr = fmt.Errorf("création session ORT : %w", err)
+			return e.persistErr
 		}
+	}
 
-		e.initialized = true
-	})
-	return e.persistErr
+	e.persistErr = nil
+	e.initialized = true
+	return nil
+}
+
+// Release libère la session ONNX et les tensors de la RAM.
+// L'environnement ORT global et le tokenizer restent en mémoire (légers).
+// Le prochain appel à Embed() rechargera automatiquement le modèle.
+func (e *ONNXEmbedderAdapter) Release() {
+	// Stopper le timer d'inactivité en premier (avant initMu) pour
+	// éviter toute inversion de verrous avec resetIdleTimer().
+	e.timerMu.Lock()
+	if e.idleTimer != nil {
+		e.idleTimer.Stop()
+		e.idleTimer = nil
+	}
+	e.timerMu.Unlock()
+
+	e.initMu.Lock()
+	defer e.initMu.Unlock()
+
+	if !e.initialized {
+		return
+	}
+
+	e.ortMu.Lock()
+	defer e.ortMu.Unlock()
+
+	if e.session != nil {
+		_ = e.session.Destroy()
+		e.session = nil
+	}
+	if e.inIDs != nil {
+		e.inIDs.Destroy()
+		e.inIDs = nil
+	}
+	if e.inMask != nil {
+		e.inMask.Destroy()
+		e.inMask = nil
+	}
+	if e.inTypes != nil {
+		e.inTypes.Destroy()
+		e.inTypes = nil
+	}
+	if e.outTensor != nil {
+		e.outTensor.Destroy()
+		e.outTensor = nil
+	}
+
+	e.initialized = false
+	log.Printf("[INFO] ONNXEmbedder - Modèle libéré de la RAM")
+	runtime.GC()
 }
 
 // Embed génère un vecteur de dimension 384 pour le texte donné.
 func (e *ONNXEmbedderAdapter) Embed(ctx context.Context, text string) ([]float32, error) {
+	// Réinitialiser le timer d'inactivité AVANT d'acquérir tout autre verrou.
+	e.resetIdleTimer()
+
 	if !e.initialized {
 		if err := e.Init(); err != nil {
 			return nil, err
-		}
-		if e.inIDs == nil || e.inMask == nil || e.outTensor == nil {
-			return nil, fmt.Errorf("embedder non initialisé : %v", e.persistErr)
 		}
 	}
 

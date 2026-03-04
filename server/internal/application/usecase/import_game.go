@@ -4,17 +4,14 @@ package usecase
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"mime/multipart"
-	"os"
-	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/repository"
+	"ask-rules-server/internal/infrastructure/storage"
 )
 
 // PipelineService interface pour le pipeline d'import.
@@ -35,6 +32,7 @@ type ImportGameUseCase struct {
 	sectionRepo repository.SectionRepository
 	pipeline    PipelineService
 	uploadsDir  string
+	logRepo     LogRepository
 }
 
 // NewImportGameUseCase crée un nouveau use case.
@@ -43,12 +41,14 @@ func NewImportGameUseCase(
 	sectionRepo repository.SectionRepository,
 	pipeline PipelineService,
 	uploadsDir string,
+	logRepo LogRepository,
 ) *ImportGameUseCase {
 	return &ImportGameUseCase{
 		gameRepo:    gameRepo,
 		sectionRepo: sectionRepo,
 		pipeline:    pipeline,
 		uploadsDir:  uploadsDir,
+		logRepo:     logRepo,
 	}
 }
 
@@ -101,7 +101,7 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 	for _, fh := range req.Files {
 		emit("uploading", map[string]interface{}{"file": fh.Filename})
 
-		filePath, err := uc.saveFile(fh, slug)
+		filePath, err := storage.SaveUploadedFile(fh, slug)
 		if err != nil {
 			log.Printf("[ERROR] ImportGame - Failed to save file '%s' for game '%s': %v", fh.Filename, req.GameName, err)
 			emit("upload_error", map[string]interface{}{
@@ -119,6 +119,16 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 	}
 
 	// Sauvegarder le jeu
+	if game.Stats == nil {
+		game.Stats = make(map[string]interface{})
+	}
+	// En mode merge, conserver les fichiers existants ; en mode replace, remplacer
+	if !isNew && req.Mode == "merge" {
+		existing := toStringSlice(game.Stats["files"])
+		game.Stats["files"] = mergeUnique(existing, filePaths)
+	} else {
+		game.Stats["files"] = filePaths
+	}
 	if err := uc.gameRepo.Save(ctx, game); err != nil {
 		log.Printf("[ERROR] ImportGame - Failed to save game '%s': %v", req.GameName, err)
 		return fmt.Errorf("failed to save game: %w", err)
@@ -149,55 +159,47 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 	// Forcer garbage collection après import (libérer RAM)
 	runtime.GC()
 
+	duration := time.Since(start)
+
+	// Logger l'import en base de données
+	if uc.logRepo != nil {
+		_ = uc.logRepo.Save(ctx, &LogEntry{
+			EventType: "game_import",
+			Message:   fmt.Sprintf("Import du jeu '%s' (%d fichier(s))", req.GameName, len(filePaths)),
+			Metadata: map[string]interface{}{
+				"game":     req.GameName,
+				"files":    len(filePaths),
+				"mode":     req.Mode,
+				"duration": duration.Milliseconds(),
+				"new_game": isNew,
+			},
+		})
+	}
+
 	emit("complete", map[string]interface{}{
 		"game":     req.GameName,
 		"files":    len(filePaths),
-		"duration": time.Since(start).Milliseconds(),
+		"duration": duration.Milliseconds(),
 	})
 
 	return nil
 }
 
-// saveFile sauvegarde un fichier uploadé sur le disque.
-func (uc *ImportGameUseCase) saveFile(fh *multipart.FileHeader, slug string) (string, error) {
-	// Ouvrir le fichier uploadé
-	src, err := fh.Open()
-	if err != nil {
-		return "", fmt.Errorf("failed to open uploaded file: %w", err)
+// mergeUnique fusionne deux slices en éliminant les doublons.
+func mergeUnique(existing, newPaths []string) []string {
+	seen := make(map[string]struct{}, len(existing))
+	result := make([]string, 0, len(existing)+len(newPaths))
+	for _, p := range existing {
+		if _, ok := seen[p]; !ok {
+			seen[p] = struct{}{}
+			result = append(result, p)
+		}
 	}
-	defer src.Close()
-
-	// Créer le répertoire de destination
-	dstDir := filepath.Join(uc.uploadsDir, slug)
-	if err := os.MkdirAll(dstDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create directory: %w", err)
+	for _, p := range newPaths {
+		if _, ok := seen[p]; !ok {
+			seen[p] = struct{}{}
+			result = append(result, p)
+		}
 	}
-
-	// Générer un nom de fichier sécurisé
-	filename := sanitizeFilename(fh.Filename)
-	dstPath := filepath.Join(dstDir, filename)
-
-	// Créer le fichier de destination
-	dst, err := os.Create(dstPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to create file: %w", err)
-	}
-	defer dst.Close()
-
-	// Copier le contenu
-	if _, err := io.Copy(dst, src); err != nil {
-		return "", fmt.Errorf("failed to copy file: %w", err)
-	}
-
-	// Retourner le chemin relatif
-	return filepath.Join(slug, filename), nil
-}
-
-// sanitizeFilename nettoie un nom de fichier.
-func sanitizeFilename(name string) string {
-	// Enlever les path traversals
-	name = filepath.Base(name)
-	// Remplacer les caractères dangereux
-	name = strings.ReplaceAll(name, "..", "")
-	return name
+	return result
 }

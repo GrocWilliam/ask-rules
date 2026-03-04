@@ -13,7 +13,7 @@ import (
 func TestAdminAuthUseCase_Login_Success(t *testing.T) {
 	// Arrange
 	password := "admin123"
-	uc := usecase.NewAdminAuthUseCase(password)
+	uc := usecase.NewAdminAuthUseCase(password, nil)
 
 	req := &usecase.LoginRequest{
 		Password: password,
@@ -49,7 +49,7 @@ func TestAdminAuthUseCase_Login_Success(t *testing.T) {
 // Test : Login avec mot de passe invalide
 func TestAdminAuthUseCase_Login_InvalidPassword(t *testing.T) {
 	// Arrange
-	uc := usecase.NewAdminAuthUseCase("correct-password")
+	uc := usecase.NewAdminAuthUseCase("correct-password", nil)
 
 	req := &usecase.LoginRequest{
 		Password: "wrong-password",
@@ -76,7 +76,7 @@ func TestAdminAuthUseCase_Login_InvalidPassword(t *testing.T) {
 func TestAdminAuthUseCase_Logout_Success(t *testing.T) {
 	// Arrange
 	password := "admin123"
-	uc := usecase.NewAdminAuthUseCase(password)
+	uc := usecase.NewAdminAuthUseCase(password, nil)
 
 	// Login d'abord
 	loginResp, _ := uc.Login(context.Background(), &usecase.LoginRequest{Password: password})
@@ -99,7 +99,7 @@ func TestAdminAuthUseCase_Logout_Success(t *testing.T) {
 // Test : CheckSession avec token invalide
 func TestAdminAuthUseCase_CheckSession_InvalidToken(t *testing.T) {
 	// Arrange
-	uc := usecase.NewAdminAuthUseCase("password")
+	uc := usecase.NewAdminAuthUseCase("password", nil)
 
 	// Act
 	valid, err := uc.CheckSession(context.Background(), "invalid-token")
@@ -117,7 +117,7 @@ func TestAdminAuthUseCase_CheckSession_InvalidToken(t *testing.T) {
 // Test : CheckSession avec token vide
 func TestAdminAuthUseCase_CheckSession_EmptyToken(t *testing.T) {
 	// Arrange
-	uc := usecase.NewAdminAuthUseCase("password")
+	uc := usecase.NewAdminAuthUseCase("password", nil)
 
 	// Act
 	valid, err := uc.CheckSession(context.Background(), "")
@@ -136,7 +136,7 @@ func TestAdminAuthUseCase_CheckSession_EmptyToken(t *testing.T) {
 func TestAdminAuthUseCase_MultipleSessions(t *testing.T) {
 	// Arrange
 	password := "admin123"
-	uc := usecase.NewAdminAuthUseCase(password)
+	uc := usecase.NewAdminAuthUseCase(password, nil)
 
 	// Act - Créer deux sessions
 	resp1, _ := uc.Login(context.Background(), &usecase.LoginRequest{Password: password})

@@ -118,12 +118,11 @@ func (m *MistralLLMAdapter) queryMistral(ctx context.Context, question, ctxText 
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: prompt},
 		},
-		MaxTokens:   1024,
+		MaxTokens:   4096,
 		Temperature: 0.3,
 	}
 
 	body, _ := json.Marshal(reqBody)
-	fmt.Printf("[DEBUG] Mistral request body: %s\n", string(body))
 
 	req, err := http.NewRequestWithContext(ctx, "POST",
 		"https://api.mistral.ai/v1/chat/completions",
@@ -208,7 +207,7 @@ func (m *MistralLLMAdapter) queryOpenAI(ctx context.Context, question, ctxText s
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: prompt},
 		},
-		MaxTokens:   1024,
+		MaxTokens:   4096,
 		Temperature: 0.3,
 	}
 	body, _ := json.Marshal(reqBody)
@@ -255,9 +254,10 @@ func (m *MistralLLMAdapter) queryOpenAI(ctx context.Context, question, ctxText s
 // ── Ollama API ───────────────────────────────────────────────────────────────
 
 type ollamaRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Stream bool   `json:"stream"`
+	Model      string `json:"model"`
+	Prompt     string `json:"prompt"`
+	Stream     bool   `json:"stream"`
+	NumPredict int    `json:"num_predict,omitempty"`
 }
 
 type ollamaResponse struct {
@@ -268,9 +268,10 @@ type ollamaResponse struct {
 func (m *MistralLLMAdapter) queryOllama(ctx context.Context, question, ctxText string) (entity.LLMResponse, error) {
 	prompt := fmt.Sprintf("%s\n\nContexte du jeu :\n%s\n\nQuestion : %s", systemPrompt, ctxText, question)
 	reqBody := ollamaRequest{
-		Model:  config.C.OllamaModel,
-		Prompt: prompt,
-		Stream: false,
+		Model:      config.C.OllamaModel,
+		Prompt:     prompt,
+		Stream:     false,
+		NumPredict: 4096,
 	}
 	body, _ := json.Marshal(reqBody)
 	fmt.Printf("[DEBUG] Ollama request body: %s\n", string(body))

@@ -41,8 +41,9 @@ func TestAskQuestionUseCase_Execute_Success(t *testing.T) {
 
 	llmSvc := &mockLLM{}
 	cache := newMockCache()
+	logRepo := &mockLogRepo{}
 
-	uc := usecase.NewAskQuestionUseCase(gameRepo, retriever, llmSvc, cache)
+	uc := usecase.NewAskQuestionUseCase(gameRepo, retriever, llmSvc, cache, logRepo)
 
 	req := &usecase.AskRequest{
 		GameName: "Wingspan",
@@ -81,8 +82,9 @@ func TestAskQuestionUseCase_Execute_GameNotFound(t *testing.T) {
 	retriever := &mockRetriever{}
 	llmSvc := &mockLLM{}
 	cache := newMockCache()
+	logRepo := &mockLogRepo{}
 
-	uc := usecase.NewAskQuestionUseCase(gameRepo, retriever, llmSvc, cache)
+	uc := usecase.NewAskQuestionUseCase(gameRepo, retriever, llmSvc, cache, logRepo)
 
 	req := &usecase.AskRequest{
 		GameName: "Unknown Game",
@@ -128,8 +130,9 @@ func TestAskQuestionUseCase_Execute_CacheHit(t *testing.T) {
 	}
 	llmSvc := &mockLLM{}
 	cache := newMockCache()
+	logRepo := &mockLogRepo{}
 
-	uc := usecase.NewAskQuestionUseCase(gameRepo, retriever, llmSvc, cache)
+	uc := usecase.NewAskQuestionUseCase(gameRepo, retriever, llmSvc, cache, logRepo)
 
 	req := &usecase.AskRequest{
 		GameName: "Wingspan",

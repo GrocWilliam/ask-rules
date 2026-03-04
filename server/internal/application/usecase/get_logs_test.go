@@ -11,7 +11,15 @@ import (
 
 // Mock LogRepository
 type mockLogRepo struct {
+	saveFunc      func(ctx context.Context, entry *usecase.LogEntry) error
 	getRecentFunc func(ctx context.Context, limit int) ([]*usecase.LogEntry, error)
+}
+
+func (m *mockLogRepo) Save(ctx context.Context, entry *usecase.LogEntry) error {
+	if m.saveFunc != nil {
+		return m.saveFunc(ctx, entry)
+	}
+	return nil
 }
 
 func (m *mockLogRepo) GetRecent(ctx context.Context, limit int) ([]*usecase.LogEntry, error) {
