@@ -9,4 +9,5 @@ uploads/
 !uploads/.gitkeep
 models
 server/ask-rules-server
+server/main
 server/tmp
