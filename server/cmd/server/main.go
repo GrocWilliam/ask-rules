@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	// Domain (interfaces uniquement)
 	"ask-rules-server/internal/application/usecase"
@@ -125,7 +126,17 @@ func main() {
 	fmt.Printf("  GET    /api/admin/logs                       - Get logs\n")
 	fmt.Printf("  GET    /api/admin/files                      - List uploaded files\n")
 	fmt.Printf("  DELETE /api/admin/files/{slug}/{filename}    - Delete file\n")
-	if err := http.ListenAndServe(addr, r); err != nil {
+
+	// Configurer le serveur HTTP avec des timeouts adaptés aux imports longs (SSE)
+	server := &http.Server{
+		Addr:         addr,
+		Handler:      r,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 0, // Pas de timeout d'écriture pour les SSE de longue durée
+		IdleTimeout:  120 * time.Second,
+	}
+
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

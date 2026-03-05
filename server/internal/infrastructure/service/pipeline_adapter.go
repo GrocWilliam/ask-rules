@@ -181,7 +181,8 @@ func (p *PipelineAdapter) processFileStreaming(
 		}
 
 		// NLP
-		sectionType := nlp.DetectSectionType("", cleanText)
+		titleCandidate := extractTitleCandidate(cleanText)
+		sectionType := nlp.DetectSectionType(titleCandidate, cleanText)
 		mechanics := nlp.DetectMechanics(cleanText)
 
 		section := entity.Section{
@@ -214,7 +215,9 @@ func (p *PipelineAdapter) processFileStreaming(
 			}
 		}
 
-		if i%10 == 0 {
+		// Envoyer un événement de progression tous les 3 chunks (au lieu de 10)
+		// pour éviter les timeouts durant les embeddings longs
+		if i%3 == 0 || i == len(chunks)-1 {
 			emit("progress", map[string]interface{}{"file": fp, "done": i + 1, "total": len(chunks)})
 		}
 	}
@@ -253,15 +256,30 @@ func newUUID() string {
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func sanitizeUTF8(s string) string {
 	return strings.ToValidUTF8(s, "")
+}
+
+// extractTitleCandidate extrait la première ligne significative d'un texte pour servir de titre candidat.
+func extractTitleCandidate(text string) string {
+	for _, line := range strings.SplitN(text, "\n", 10) {
+		line = strings.TrimSpace(line)
+		runes := []rune(line)
+		if len(runes) >= 4 && len(runes) <= 80 {
+			allDigitsOrPunct := true
+			letterCount := 0
+			for _, r := range runes {
+				if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r > 127 {
+					allDigitsOrPunct = false
+					letterCount++
+				}
+			}
+			if !allDigitsOrPunct && letterCount >= 3 {
+				return line
+			}
+		}
+	}
+	return ""
 }
 
 func generateTitle(sectionType, text string, index int) string {
@@ -720,6 +738,13 @@ func resolvePageNumber(chunk string, pages []pageInfo) int {
 	return pages[0].Number
 }
 
+// isLowQualityText checks whether the provided text is considered low quality based on several heuristics.
+// It returns true if:
+// - the text is empty or contains only whitespace
+// - less than 45% of characters are letters
+// - more than 60% of tokens (up to first 30) are short words (2 characters or fewer)
+// - the text contains fewer than 5 unique words (case-insensitive, non-alphanumeric chars stripped) in a sample of 10+ tokens
+// Otherwise, it returns false.
 func isLowQualityText(text string) bool {
 	runes := []rune(strings.TrimSpace(text))
 	if len(runes) == 0 {
