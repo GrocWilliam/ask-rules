@@ -54,10 +54,11 @@ func NewImportGameUseCase(
 
 // ImportRequest représente la requête d'import.
 type ImportRequest struct {
-	GameName string
-	Files    []*multipart.FileHeader
-	Mode     string // "replace" ou "merge"
-	OnEvent  func(event string, data map[string]interface{})
+	GameName       string
+	Files          []*multipart.FileHeader
+	PreCopiedPaths []string // Chemins de fichiers déjà copiés dans uploads/ (pour les URLs)
+	Mode           string   // "replace" ou "merge"
+	OnEvent        func(event string, data map[string]interface{})
 }
 
 // Execute importe un ou plusieurs fichiers pour un jeu.
@@ -71,7 +72,7 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 	if req.GameName == "" {
 		return fmt.Errorf("game name is required")
 	}
-	if len(req.Files) == 0 {
+	if len(req.Files) == 0 && len(req.PreCopiedPaths) == 0 {
 		return fmt.Errorf("no files provided")
 	}
 
@@ -98,6 +99,7 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 	// Sauvegarder les fichiers uploadés
 	var filePaths []string
 
+	// Traiter les fichiers uploadés via multipart
 	for _, fh := range req.Files {
 		emit("uploading", map[string]interface{}{"file": fh.Filename})
 
@@ -113,6 +115,9 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 
 		filePaths = append(filePaths, filePath)
 	}
+
+	// Ajouter les fichiers déjà copiés (URLs)
+	filePaths = append(filePaths, req.PreCopiedPaths...)
 
 	if len(filePaths) == 0 {
 		return fmt.Errorf("no files saved successfully")
