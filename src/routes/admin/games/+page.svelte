@@ -2,6 +2,7 @@
   import { invalidateAll } from '$app/navigation';
   import type { PageData } from './$types';
   import SEO from '$lib/SEO.svelte';
+  import JobTracker from '$lib/JobTracker.svelte';
 
   export let data: PageData;
 
@@ -38,6 +39,10 @@
   let reprocessAllGameList: GameProgress[] = [];
   let reprocessAllCurrentGame = '';
   let reprocessAllEmbedding: { current: number; total: number } | null = null;
+
+  // ── Job Tracker ────────────────────────────────────────────────────────────
+  let jobTrackerActive = false;
+  let currentJobId = '';
 
   // ── Sélection de jeux pour le recalcul ────────────────────────────────────
   let selectedGameIDs = new Set<string>();
@@ -107,7 +112,10 @@
 
           const t = evt.type as string;
 
-          if (t === 'start') {
+          if (t === 'job_started') {
+            currentJobId = evt.job_id as string;
+            jobTrackerActive = true;
+          } else if (t === 'start') {
             reprocessAllTotal = evt.total as number;
             reprocessAllGameList = targetGames.map((g: any) => ({
               name: g.name,
@@ -253,7 +261,10 @@
 
           const t = evt.type as string;
 
-          if (t === 'step') {
+          if (t === 'job_started') {
+            currentJobId = evt.job_id as string;
+            jobTrackerActive = true;
+          } else if (t === 'step') {
             pushStep(evt.message as string);
           } else if (t === 'embedding_start') {
             reprocessOneEmbedding = { current: 0, total: evt.total as number };
@@ -569,6 +580,9 @@
     </div>
   {/if}
 </div>
+
+<!-- Job Tracker pour reprendre le suivi après déconnexion -->
+<JobTracker bind:jobId={currentJobId} bind:active={jobTrackerActive} />
 
 <style>
   .page-header {
