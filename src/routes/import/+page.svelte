@@ -83,6 +83,8 @@
           if (evt.type === 'ping') {
             // Heartbeat pour garder la connexion SSE ouverte - ignorer silencieusement
             continue;
+          } else if (evt.type === 'downloading') {
+            steps = [...steps, { message: `📥 Téléchargement depuis ${evt.url as string}...` }];
           } else if (evt.type === 'start') {
             steps = [...steps, { message: `Import de « ${evt.game} » — ${evt.files} fichier(s)` }];
           } else if (evt.type === 'replacing') {

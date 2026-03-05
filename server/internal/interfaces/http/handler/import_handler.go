@@ -4,8 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +20,20 @@ import (
 )
 
 const maxUploadSize = 50 << 20 // 50 MB
+
+// slugify convertit un texte en slug (copié depuis usecase/helpers.go pour éviter import cyclique)
+func slugify(s string) string {
+	s = strings.ToLower(s)
+	s = strings.ReplaceAll(s, " ", "-")
+	s = strings.ReplaceAll(s, "'", "")
+	var result strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
+}
 
 // ImportHandler gère les requêtes HTTP pour l'import de jeux.
 type ImportHandler struct {
@@ -29,6 +48,132 @@ func NewImportHandler(importUseCase *usecase.ImportGameUseCase, reprocessUseCase
 		importUseCase:    importUseCase,
 		reprocessUseCase: reprocessUseCase,
 		jobTracker:       NewJobTracker(),
+	}
+}
+
+// downloadFileFromURL télécharge un fichier depuis une URL et le sauvegarde dans uploads/
+func downloadAndSaveFromURL(url string, slug string) (string, string, error) {
+	// Télécharger le fichier
+	client := &http.Client{
+		Timeout: 60 * time.Second,
+	}
+
+	// Créer la requête avec un User-Agent pour éviter les blocages
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; AskRulesBot/1.0)")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("download failed with status: %d", resp.StatusCode)
+	}
+
+	log.Printf("[INFO] downloadAndSaveFromURL - Downloading from %s (Content-Type: %s, Content-Length: %s)",
+		url, resp.Header.Get("Content-Type"), resp.Header.Get("Content-Length"))
+
+	// Extraire le nom du fichier depuis l'URL ou Content-Disposition
+	filename := extractFilenameFromURL(url, resp)
+
+	// Créer le répertoire uploads/{slug}/
+	uploadDir := filepath.Join("uploads", slug)
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return "", "", fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Créer le fichier de destination
+	destPath := filepath.Join(uploadDir, filename)
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create file: %w", err)
+	}
+	defer destFile.Close()
+
+	// Copier le contenu
+	size, err := io.Copy(destFile, resp.Body)
+	if err != nil {
+		os.Remove(destPath)
+		return "", "", fmt.Errorf("failed to save file: %w", err)
+	}
+
+	// Synchroniser sur le disque pour s'assurer que les données sont écrites
+	if err := destFile.Sync(); err != nil {
+		os.Remove(destPath)
+		return "", "", fmt.Errorf("failed to sync file: %w", err)
+	}
+
+	// Vérifier que le fichier n'est pas vide
+	if size == 0 {
+		os.Remove(destPath)
+		return "", "", fmt.Errorf("downloaded file is empty (0 bytes)")
+	}
+
+	log.Printf("[INFO] downloadAndSaveFromURL - Downloaded %d bytes to %s", size, destPath)
+
+	// Retourner le chemin relatif (slug/filename) et le nom du fichier
+	return slug + "/" + filename, filename, nil
+}
+
+// extractFilenameFromURL extrait le nom du fichier depuis l'URL ou les headers
+func extractFilenameFromURL(url string, resp *http.Response) string {
+	// 1. Essayer Content-Disposition header
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		if strings.Contains(cd, "filename=") {
+			parts := strings.Split(cd, "filename=")
+			if len(parts) > 1 {
+				filename := strings.Trim(parts[1], `"`)
+				if filename != "" {
+					return filename
+				}
+			}
+		}
+	}
+
+	// 2. Extraire depuis l'URL
+	urlPath := url
+	if idx := strings.LastIndex(urlPath, "/"); idx != -1 {
+		urlPath = urlPath[idx+1:]
+	}
+	if idx := strings.Index(urlPath, "?"); idx != -1 {
+		urlPath = urlPath[:idx]
+	}
+
+	// 3. Si pas d'extension, utiliser Content-Type
+	if !strings.Contains(urlPath, ".") {
+		contentType := resp.Header.Get("Content-Type")
+		ext := getExtensionFromContentType(contentType)
+		if urlPath == "" {
+			urlPath = "downloaded-file" + ext
+		} else {
+			urlPath = urlPath + ext
+		}
+	}
+
+	if urlPath == "" {
+		return "downloaded-file.pdf"
+	}
+
+	return urlPath
+}
+
+// getExtensionFromContentType retourne l'extension basée sur le Content-Type
+func getExtensionFromContentType(contentType string) string {
+	contentType = strings.ToLower(strings.Split(contentType, ";")[0])
+	switch contentType {
+	case "application/pdf":
+		return ".pdf"
+	case "text/plain":
+		return ".txt"
+	case "text/html":
+		return ".html"
+	default:
+		return ".txt"
 	}
 }
 
@@ -145,18 +290,52 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Récupérer les fichiers
-	files := r.MultipartForm.File["fichier"]
-	if len(files) == 0 {
-		files = r.MultipartForm.File["files"]
-	}
-	if len(files) == 0 {
-		files = r.MultipartForm.File["file"]
-	}
-	if len(files) == 0 {
-		log.Printf("[ERROR] /api/import - No files provided for game '%s'", gameName)
-		sendError("No files provided")
-		return
+	// Détecter le mode d'import (file ou url)
+	importMode := r.FormValue("importMode")
+	var files []*multipart.FileHeader
+	var preCopiedPaths []string
+
+	if importMode == "url" {
+		// Import via URL
+		urlStr := r.FormValue("url")
+		if urlStr == "" {
+			log.Printf("[ERROR] /api/import - Missing URL for game '%s'", gameName)
+			sendError("URL is required for URL import mode")
+			return
+		}
+
+		log.Printf("[INFO] /api/import - Downloading file from URL: %s", urlStr)
+		send("downloading", map[string]interface{}{"url": urlStr})
+
+		// Calculer le slug pour créer le bon répertoire
+		slug := slugify(gameName)
+
+		// Télécharger et sauvegarder directement dans uploads/
+		filePath, filename, err := downloadAndSaveFromURL(urlStr, slug)
+		if err != nil {
+			log.Printf("[ERROR] /api/import - Failed to download from URL '%s': %v", urlStr, err)
+			sendError(fmt.Sprintf("Failed to download file: %v", err))
+			return
+		}
+
+		// Ajouter à la liste des fichiers pré-copiés
+		preCopiedPaths = append(preCopiedPaths, filePath)
+
+		log.Printf("[INFO] /api/import - Successfully downloaded '%s' from URL", filename)
+	} else {
+		// Import via fichier (mode classique)
+		files = r.MultipartForm.File["fichier"]
+		if len(files) == 0 {
+			files = r.MultipartForm.File["files"]
+		}
+		if len(files) == 0 {
+			files = r.MultipartForm.File["file"]
+		}
+		if len(files) == 0 {
+			log.Printf("[ERROR] /api/import - No files provided for game '%s'", gameName)
+			sendError("No files provided")
+			return
+		}
 	}
 
 	// Mode d'import
@@ -167,10 +346,11 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 	// Créer la requête
 	req := &usecase.ImportRequest{
-		GameName: gameName,
-		Files:    files,
-		Mode:     mode,
-		OnEvent:  send,
+		GameName:       gameName,
+		Files:          files,
+		PreCopiedPaths: preCopiedPaths,
+		Mode:           mode,
+		OnEvent:        send,
 	}
 
 	// Exécuter le use case avec un contexte indépendant
