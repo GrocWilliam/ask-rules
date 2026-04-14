@@ -59,7 +59,7 @@
   }
 
   function selectAllGames() {
-    selectedGameIDs = new SvelteSet(data.games.map((g: any) => g.id));
+    selectedGameIDs = new SvelteSet(data.games.map((g) => g.id));
   }
 
   function selectNoGames() {
