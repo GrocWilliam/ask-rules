@@ -20,15 +20,11 @@ func NewListGamesUseCase(gameRepo repository.GameRepository) *ListGamesUseCase {
 
 // GameDTO représente un jeu dans la réponse API.
 type GameDTO struct {
-	ID            string                 `json:"id"`
-	Name          string                 `json:"name"`
-	FilePath      string                 `json:"file_path"`
-	AddedAt       time.Time              `json:"added_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
-	Metadata      map[string]interface{} `json:"metadata"`
-	Stats         map[string]interface{} `json:"stats"`
-	Gameplay      map[string]interface{} `json:"gameplay"`
-	SectionsCount int                    `json:"sections_count"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	AddedAt       time.Time `json:"added_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	SectionsCount int       `json:"sections_count"`
 }
 
 // Execute liste tous les jeux avec leur nombre de sections.
@@ -43,12 +39,8 @@ func (uc *ListGamesUseCase) Execute(ctx context.Context) ([]*GameDTO, error) {
 		result[i] = &GameDTO{
 			ID:            game.ID,
 			Name:          game.Name,
-			FilePath:      game.FilePath,
 			AddedAt:       game.AddedAt,
 			UpdatedAt:     game.UpdatedAt,
-			Metadata:      game.Metadata,
-			Stats:         game.Stats,
-			Gameplay:      game.Gameplay,
 			SectionsCount: game.SectionsCount,
 		}
 	}

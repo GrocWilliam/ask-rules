@@ -3,6 +3,8 @@
   import type { PageData } from './$types';
   import SEO from '$lib/SEO.svelte';
   import JobTracker from '$lib/JobTracker.svelte';
+  import { SvelteSet } from 'svelte/reactivity';
+  import { resolve } from '$app/paths';
 
   export let data: PageData;
 
@@ -45,7 +47,7 @@
   let currentJobId = '';
 
   // ── Sélection de jeux pour le recalcul ────────────────────────────────────
-  let selectedGameIDs = new Set<string>();
+  let selectedGameIDs = new SvelteSet<string>();
 
   function toggleGameSelection(id: string) {
     if (selectedGameIDs.has(id)) {
@@ -53,15 +55,15 @@
     } else {
       selectedGameIDs.add(id);
     }
-    selectedGameIDs = new Set(selectedGameIDs); // déclencher la réactivité Svelte
+    selectedGameIDs = new SvelteSet(selectedGameIDs); // déclencher la réactivité Svelte
   }
 
   function selectAllGames() {
-    selectedGameIDs = new Set(data.games.map((g: any) => g.id));
+    selectedGameIDs = new SvelteSet(data.games.map((g: any) => g.id));
   }
 
   function selectNoGames() {
-    selectedGameIDs = new Set();
+    selectedGameIDs = new SvelteSet();
   }
 
   $: selectedCount = selectedGameIDs.size;
@@ -80,7 +82,7 @@
     // Jeux ciblés : sélection explicite ou tous
     const targetIDs = selectedCount > 0 ? [...selectedGameIDs] : [];
     const targetGames =
-      targetIDs.length > 0 ? data.games.filter((g: any) => targetIDs.includes(g.id)) : data.games;
+      targetIDs.length > 0 ? data.games.filter((g) => targetIDs.includes(g.id)) : data.games;
 
     try {
       const res = await fetch('/api/admin/reprocess-all', {
@@ -117,7 +119,7 @@
             jobTrackerActive = true;
           } else if (t === 'start') {
             reprocessAllTotal = evt.total as number;
-            reprocessAllGameList = targetGames.map((g: any) => ({
+            reprocessAllGameList = targetGames.map((g) => ({
               name: g.name,
               status: 'pending' as const,
             }));
@@ -181,13 +183,6 @@
       month: 'long',
       day: 'numeric',
     });
-  }
-
-  function formatFileSize(bytes: number | undefined) {
-    if (!bytes) return 'N/A';
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
   }
 
   async function deleteGame(gameId: string) {
@@ -334,7 +329,7 @@
         🔄 Tout recalculer
       {/if}
     </button>
-    <a href="/import" class="btn btn-primary">+ Importer un jeu</a>
+    <a href={resolve('/import')} class="btn btn-primary">+ Importer un jeu</a>
   </div>
 </div>
 
@@ -363,7 +358,7 @@
 
     {#if reprocessOneSteps.length > 0}
       <div class="one-steps">
-        {#each reprocessOneSteps as step}
+        {#each reprocessOneSteps as step (step.msg)}
           <div class="one-step one-step-{step.status}">
             {#if step.status === 'running'}
               <span class="spinner-small"></span>
@@ -459,7 +454,7 @@
 
     {#if reprocessAllGameList.length > 0}
       <div class="game-status-list">
-        {#each reprocessAllGameList as gp}
+        {#each reprocessAllGameList as gp (gp.name)}
           <div class="game-status-row game-status-{gp.status}">
             {#if gp.status === 'pending'}⏳
             {:else if gp.status === 'running'}<span class="spinner-small"></span>
@@ -481,7 +476,7 @@
 {/if}
 
 <div class="games-grid">
-  {#each data.games as game}
+  {#each data.games as game (game.id)}
     <div class="game-card" class:selected={selectedGameIDs.has(game.id)}>
       <div class="game-header">
         <label class="game-select-label" title="Sélectionner pour le recalcul">
@@ -501,10 +496,6 @@
           <code class="value">{game.id}</code>
         </div>
         <div class="info-row">
-          <span class="label">Fichier:</span>
-          <span class="value file-name">{game.file_path}</span>
-        </div>
-        <div class="info-row">
           <span class="label">Date d'ajout:</span>
           <span class="value">{formatDate(game.added_at)}</span>
         </div>
@@ -512,31 +503,6 @@
           <div class="info-row">
             <span class="label">Mis à jour:</span>
             <span class="value">{formatDate(game.updated_at)}</span>
-          </div>
-        {/if}
-        {#if game.stats?.pageCount}
-          <div class="info-row">
-            <span class="label">Pages:</span>
-            <span class="value">{game.stats.pageCount}</span>
-          </div>
-        {/if}
-        {#if game.stats?.fileSize}
-          <div class="info-row">
-            <span class="label">Taille:</span>
-            <span class="value">{formatFileSize(game.stats.fileSize)}</span>
-          </div>
-        {/if}
-        {#if game.metadata?.mecaniques?.length}
-          <div class="info-row mecaniques">
-            <span class="label">Mécaniques:</span>
-            <div class="mecaniques-list">
-              {#each game.metadata.mecaniques.slice(0, 5) as mecanique}
-                <span class="mecanique-tag">{mecanique}</span>
-              {/each}
-              {#if game.metadata.mecaniques.length > 5}
-                <span class="mecanique-tag more">+{game.metadata.mecaniques.length - 5}</span>
-              {/if}
-            </div>
           </div>
         {/if}
       </div>
@@ -576,7 +542,7 @@
   {#if data.games.length === 0}
     <div class="empty-state">
       <p>Aucun jeu dans la base de données.</p>
-      <a href="/import" class="btn btn-primary">Importer des règles</a>
+      <a href={resolve('/import')} class="btn btn-primary">Importer des règles</a>
     </div>
   {/if}
 </div>

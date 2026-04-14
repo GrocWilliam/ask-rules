@@ -1,10 +1,12 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import SEO from '$lib/SEO.svelte';
+  import type { GameFile } from '../../../types/gamefile.type';
+  import { resolve } from '$app/paths';
 
   export let data: PageData;
 
-  let files: any[] = data.files as any[];
+  let files: GameFile[] = data.files as GameFile[];
   let deletingFile: string | null = null;
   let confirmDelete: string | null = null;
   let toast: { ok: boolean; msg: string } | null = null;
@@ -13,16 +15,16 @@
     confirmDelete = confirmDelete === filePath ? null : filePath;
   }
 
-  async function deleteFile(file: any) {
+  async function deleteFile(file: GameFile) {
     deletingFile = file.path;
     try {
-      const [slug, filename] = file.relativePath.split('/');
+      const [slug, filename] = file.relative_path.split('/');
       const res = await fetch(`/api/admin/files/${slug}/${filename}`, { method: 'DELETE' });
       if (!res.ok) {
         const text = await res.text();
         toast = { ok: false, msg: text || 'Erreur lors de la suppression' };
       } else {
-        files = files.filter((f: any) => f.path !== file.path);
+        files = files.filter((f: GameFile) => f.path !== file.path);
         toast = { ok: true, msg: `Fichier « ${file.name} » supprimé.` };
       }
     } catch {
@@ -68,12 +70,12 @@
 
   // Grouper les fichiers par jeu
   $: filesByGame = files.reduce(
-    (acc: Record<string, any[]>, file: any) => {
+    (acc: Record<string, GameFile[]>, file: GameFile) => {
       if (!acc[file.game]) acc[file.game] = [];
       acc[file.game].push(file);
       return acc;
     },
-    {} as Record<string, any[]>
+    {} as Record<string, GameFile[]>
   );
 </script>
 
@@ -102,11 +104,11 @@
 {#if files.length === 0}
   <div class="empty-state">
     <p>Aucun fichier uploadé pour le moment.</p>
-    <a href="/import" class="btn btn-primary">Importer des règles</a>
+    <a href={resolve('/import')} class="btn btn-primary">Importer des règles</a>
   </div>
 {:else}
   <div class="games-section">
-    {#each Object.entries(filesByGame) as [game, files]}
+    {#each Object.entries(filesByGame) as [game, files] (game)}
       <div class="game-group">
         <h2 class="game-title">
           🎮 {game}
@@ -114,7 +116,7 @@
         </h2>
 
         <div class="files-list">
-          {#each files as file}
+          {#each files as file (file.name)}
             <div class="file-card">
               <div class="file-icon">{getFileIcon(file.name)}</div>
 
@@ -125,11 +127,11 @@
                   <span>•</span>
                   <span>{formatDate(file.modified)}</span>
                 </div>
-                <div class="file-path">{file.relativePath}</div>
+                <div class="file-path">{file.relative_path}</div>
               </div>
 
               <div class="file-actions">
-                <a href="/files/{file.relativePath}" class="btn btn-view" target="_blank">
+                <a href="/files/{file.relative_path}" class="btn btn-view" target="_blank">
                   👁️ Voir
                 </a>
 

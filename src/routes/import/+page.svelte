@@ -14,7 +14,7 @@
     const select = e.target as HTMLSelectElement;
     selectedGame = select.value;
     if (selectedGame) {
-      const game = data.games.find((g: any) => g.id === selectedGame);
+      const game = data.games.find((g) => g.id === selectedGame);
       if (game) gameNameValue = game.name;
     }
   }
@@ -182,8 +182,8 @@
         </label>
         <select id="existingGame" class="game-select" disabled={isLoading} on:change={onGameSelect}>
           <option value="">— Nouveau jeu —</option>
-          {#each data.games as g}
-            <option value={g.id}>{(g as any).name}</option>
+          {#each data.games as g (g.id)}
+            <option value={g.id}>{g.name}</option>
           {/each}
         </select>
       </div>
@@ -282,7 +282,7 @@
       <!-- Étapes terminées -->
       {#if steps.length > 0}
         <div class="progress-steps">
-          {#each steps as step}
+          {#each steps as step (step.message)}
             <div class="progress-step">
               <span class="progress-step-icon" aria-hidden="true">✔</span>
               <span>{step.message}</span>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import SEO from '$lib/SEO.svelte';
   import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
 
   let error: string | null = null;
   let isLoggingIn = false;
@@ -18,7 +19,7 @@
         body: JSON.stringify({ password: pwd }),
       });
       if (res.ok) {
-        goto('/admin/games');
+        goto(resolve('/admin/games'));
       } else {
         const d = await res.json().catch(() => ({}));
         error = d.error ?? 'Mot de passe incorrect';
