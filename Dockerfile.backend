@@ -23,7 +23,6 @@ COPY server/go.mod server/go.sum ./server/
 RUN cd server && go mod download
 
 COPY server ./server
-COPY models ./models
 
 RUN cd server && CGO_ENABLED=1 go build -ldflags="-w -s" -o /ask-rules-server ./cmd/server
 
@@ -31,6 +30,8 @@ FROM docker.io/library/debian:trixie-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    curl \
     ca-certificates \
     poppler-utils \
     && rm -rf /var/lib/apt/lists/*
@@ -39,16 +40,18 @@ COPY --from=builder /usr/local/lib/libonnxruntime.so /usr/local/lib/libonnxrunti
 RUN ldconfig
 
 COPY --from=builder /ask-rules-server ./ask-rules-server
-COPY --from=builder /workspace/models ./models
-
-RUN mkdir -p uploads
+COPY scripts/download-model.sh /app/scripts/download-model.sh
+COPY scripts/ensure-model.sh /app/scripts/ensure-model.sh
+RUN chmod +x /app/scripts/download-model.sh /app/scripts/ensure-model.sh \
+    && mkdir -p uploads models
 
 ENV ENV=production \
     PORT=8080 \
     MODEL_PATH=/app/models/multilingual-e5-small \
+    MODEL_AUTO_DOWNLOAD=true \
     UPLOADS_DIR=/app/uploads \
     LD_LIBRARY_PATH=/usr/local/lib
 
 EXPOSE 8080
 
-CMD ["/app/ask-rules-server"]
+CMD ["/app/scripts/ensure-model.sh"]
