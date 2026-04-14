@@ -6,6 +6,7 @@ build/
 dist/
 .svelte-kit/
 .react-router/
+server/cmd/server/build/
 
 # Cache local du modèle (sera téléchargé pendant le build Docker)
 .cache/

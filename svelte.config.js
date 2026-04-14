@@ -4,8 +4,8 @@ import adapter from '@sveltejs/adapter-static';
 export default {
   kit: {
     adapter: adapter({
-      pages: 'server/cmd/server/build',
-      assets: 'server/cmd/server/build',
+      pages: 'build',
+      assets: 'build',
       fallback: 'index.html',
     }),
   },
