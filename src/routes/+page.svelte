@@ -74,9 +74,7 @@
   const suggestedQuestions = [
     'Comment jouer ?',
     'Comment gagner ?',
-    'Quelles sont les conditions de fin de partie ?',
     'Comment se déroule un tour ?',
-    'Comment se déroule un combat ?',
     'Quelles sont les actions disponibles ?',
   ];
 
@@ -153,7 +151,7 @@
   <!-- Formulaire -->
   <form bind:this={formEl} class="ask-form" on:submit|preventDefault={handleSubmit}>
     <div class="suggested-tags">
-      {#each suggestedQuestions as question}
+      {#each suggestedQuestions as question, index (index)}
         <button
           type="button"
           class="tag-btn"
@@ -209,7 +207,7 @@
               {#if filteredGames.length === 0}
                 <li class="game-dropdown-empty">Aucun jeu trouvé</li>
               {:else}
-                {#each filteredGames as g}
+                {#each filteredGames as g (g.id)}
                   <li>
                     <button
                       type="button"
@@ -269,7 +267,7 @@
         <!-- Lien(s) de téléchargement du fichier source -->
         {#if form.file_path}
           <div class="file-download">
-            {#each form.file_path as filePath, index}
+            {#each form.file_path as filePath, index (filePath)}
               <a href="/files/{filePath}" class="file-download-link" target="_blank" rel="noopener">
                 <span class="file-icon">📄</span>
                 <span class="file-text">
@@ -311,7 +309,7 @@
             {form.sections.length} section{form.sections.length > 1 ? 's' : ''} source
           </summary>
           <div class="sources-list">
-            {#each form.sections as s}
+            {#each form.sections as s (s.title + s.page_num)}
               <div class="source-card">
                 <div class="source-header">
                   <span class="source-title">{s.title}</span>

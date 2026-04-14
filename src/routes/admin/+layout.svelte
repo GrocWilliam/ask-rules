@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
   import { goto } from '$app/navigation';
   import type { LayoutData } from './$types';
+  import { resolve } from '$app/paths';
 
   export let data: LayoutData;
 
@@ -13,7 +14,7 @@
       await fetch('/api/admin/logout', { method: 'POST' });
     } finally {
       isLoggingOut = false;
-      goto('/admin/login');
+      goto(resolve('/admin/login'));
     }
   }
 </script>
@@ -22,27 +23,27 @@
   <div class="admin-layout">
     <nav class="admin-nav">
       <div class="admin-nav-header">
-        <a href="/" class="admin-brand">← Reglomatic</a>
+        <a href={resolve('/')} class="admin-brand">← Reglomatic</a>
         <h1>Administration</h1>
       </div>
 
       <div class="admin-nav-links">
         <a
-          href="/admin/games"
+          href={resolve('/admin/games')}
           class="nav-link"
           class:active={$page.url.pathname.startsWith('/admin/games')}
         >
           🎮 Jeux
         </a>
         <a
-          href="/admin/files"
+          href={resolve('/admin/files')}
           class="nav-link"
           class:active={$page.url.pathname.startsWith('/admin/files')}
         >
           📁 Fichiers
         </a>
         <a
-          href="/admin/logs"
+          href={resolve('/admin/logs')}
           class="nav-link"
           class:active={$page.url.pathname.startsWith('/admin/logs')}
         >

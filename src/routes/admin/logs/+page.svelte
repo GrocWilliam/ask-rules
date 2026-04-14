@@ -1,5 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
+  import { SvelteMap } from 'svelte/reactivity';
+  import { resolve } from '$app/paths';
 
   export let data: {
     logs: Array<{
@@ -20,7 +22,7 @@
     : data.logs;
 
   $: logsByDate = (() => {
-    const groups = new Map<string, typeof data.logs>();
+    const groups = new SvelteMap<string, typeof data.logs>();
     for (const log of filteredLogs) {
       const date = new Date(log.created_at).toLocaleDateString('fr-FR', {
         weekday: 'long',
@@ -80,7 +82,7 @@
 
   <!-- Filtres -->
   <div class="filters">
-    <a href="/admin/logs" class="filter-btn" class:active={!currentFilter}>Tous</a>
+    <a href={resolve('/admin/logs')} class="filter-btn" class:active={!currentFilter}>Tous</a>
     <a
       href="/admin/logs?type=game_added"
       class="filter-btn green"
@@ -110,11 +112,11 @@
       <p>Aucun log enregistré</p>
     </div>
   {:else}
-    {#each logsByDate as [date, logs]}
+    {#each logsByDate as [date, logs] (date)}
       <section class="date-group">
         <h2 class="date-header">{date}</h2>
         <div class="logs-list">
-          {#each logs as log}
+          {#each logs as log (log.id)}
             <article class="log-card {eventTypeColors[log.event_type]}">
               <div class="log-header">
                 <span class="log-type">
@@ -147,7 +149,7 @@
 
   <!-- Navigation -->
   <footer class="footer">
-    <a href="/admin" class="back-link">← Retour à l'administration</a>
+    <a href={resolve('/admin')} class="back-link">← Retour à l'administration</a>
   </footer>
 </div>
 
