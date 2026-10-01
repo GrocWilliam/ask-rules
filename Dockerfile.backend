@@ -26,6 +26,11 @@ COPY server ./server
 
 RUN cd server && CGO_ENABLED=1 go build -ldflags="-w -s" -o /ask-rules-server ./cmd/server
 
+# Modèle d'embedding intégré à l'image : sinon il est téléchargé à chaque
+# démarrage à froid (avant que le serveur n'écoute), ce qui retarde le réveil.
+COPY scripts/download-model.sh ./scripts/download-model.sh
+RUN bash scripts/download-model.sh /models/multilingual-e5-small
+
 FROM docker.io/library/debian:trixie-slim
 WORKDIR /app
 
@@ -40,6 +45,7 @@ COPY --from=builder /usr/local/lib/libonnxruntime.so /usr/local/lib/libonnxrunti
 RUN ldconfig
 
 COPY --from=builder /ask-rules-server ./ask-rules-server
+COPY --from=builder /models ./models
 COPY scripts/download-model.sh /app/scripts/download-model.sh
 COPY scripts/ensure-model.sh /app/scripts/ensure-model.sh
 RUN chmod +x /app/scripts/download-model.sh /app/scripts/ensure-model.sh \
