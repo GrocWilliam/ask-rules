@@ -3,6 +3,8 @@
   import SEO from '$lib/SEO.svelte';
   import Markdown from '$lib/Markdown.svelte';
   import type { Game } from '../types/game.type';
+  import { onDestroy } from 'svelte';
+  import { gamesProgress, loadGames } from '$lib/gamesLoader';
 
   export let data: PageData;
 
@@ -58,16 +60,31 @@
   let gamesStatus: 'loading' | 'ready' | 'error' = 'loading';
   $: resolveGames(data.games);
 
+  let gamesError = '';
+
   async function resolveGames(promise: Promise<Game[]>) {
     gamesStatus = 'loading';
     try {
       games = await promise;
       gamesStatus = 'ready';
-    } catch {
+    } catch (error) {
       games = [];
+      gamesError = error instanceof Error ? error.message : '';
       gamesStatus = 'error';
     }
   }
+
+  function retryGames() {
+    resolveGames(loadGames());
+  }
+
+  // Horloge pour afficher le temps d'attente pendant le réveil du backend
+  let now = Date.now();
+  const clock = setInterval(() => (now = Date.now()), 1000);
+  onDestroy(() => clearInterval(clock));
+  $: waitedSeconds = $gamesProgress
+    ? Math.max(0, Math.round((now - $gamesProgress.startedAt) / 1000))
+    : 0;
 
   $: filteredGames = games.filter((g: any) =>
     (g.name ?? '').toLowerCase().includes(gameSearch.toLowerCase())
@@ -212,9 +229,23 @@
 
     <div class="form-footer">
       {#if gamesStatus === 'loading'}
-        <span class="game-label empty">⏳ Démarrage du serveur…</span>
+        <span class="game-label empty games-status" role="status">
+          {#if !$gamesProgress || ($gamesProgress.attempt === 1 && !$gamesProgress.lastError)}
+            ⏳ Chargement des jeux…{waitedSeconds >= 3 ? ` (${waitedSeconds} s)` : ''}
+          {:else}
+            ⏳ Réveil du serveur… {waitedSeconds} s
+            <small
+              >tentative {$gamesProgress.attempt}/{$gamesProgress.maxAttempts}{$gamesProgress.lastError
+                ? ` · dernière erreur : ${$gamesProgress.lastError}`
+                : ''}</small
+            >
+          {/if}
+        </span>
       {:else if gamesStatus === 'error'}
-        <span class="game-label empty">Serveur indisponible, rechargez la page</span>
+        <span class="game-label empty games-status" role="alert">
+          Serveur indisponible{gamesError ? ` (${gamesError})` : ''}
+          <button type="button" class="games-retry-btn" on:click={retryGames}>Réessayer</button>
+        </span>
       {:else if games.length > 1}
         <div class="game-search-wrapper">
           <input
