@@ -14,6 +14,7 @@ type Section struct {
 	Embedding     []float64 `json:"embedding,omitempty"`
 	PageStart     *int      `json:"page_start,omitempty"` // colonne PG: page_debut
 	PageEnd       *int      `json:"page_end,omitempty"`   // colonne PG: page_fin
+	SourceFile    string    `json:"source_file"`          // colonne PG: fichier_source (chemin relatif à UPLOADS_DIR)
 	HierarchyPath string    `json:"hierarchy_path"`       // colonne PG: hierarchy_path
 	ChunkIndex    int       `json:"chunk_index"`
 	TotalChunks   int       `json:"total_chunks"`
@@ -30,6 +31,7 @@ type ScoredSection struct {
 	Summary     string                 `json:"summary"`
 	PageStart   *int                   `json:"page_start,omitempty"`
 	PageEnd     *int                   `json:"page_end,omitempty"`
+	SourceFile  string                 `json:"source_file"`
 	Score       float64                `json:"score"`
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 }

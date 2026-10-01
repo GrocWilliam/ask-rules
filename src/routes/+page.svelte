@@ -11,7 +11,20 @@
     content: string;
     score: number;
     page_num: number | null;
+    page_end?: number | null;
+    file?: string;
   };
+
+  function pageHref(s: SectionResult): string {
+    const path = (s.file ?? '').split('/').map(encodeURIComponent).join('/');
+    return `/files/${path}#page=${s.page_num}`;
+  }
+
+  function pageLabel(s: SectionResult): string {
+    return s.page_end && s.page_end > (s.page_num ?? 0)
+      ? `p.${s.page_num}-${s.page_end}`
+      : `p.${s.page_num}`;
+  }
 
   type FormResult =
     | {
@@ -309,13 +322,21 @@
             {form.sections.length} section{form.sections.length > 1 ? 's' : ''} source
           </summary>
           <div class="sources-list">
-            {#each form.sections as s (s.title + s.page_num)}
+            {#each form.sections as s, i (i)}
               <div class="source-card">
                 <div class="source-header">
                   <span class="source-title">{s.title}</span>
                   <div class="source-meta">
-                    {#if s.page_num}
-                      <span class="source-page">p.{s.page_num}</span>
+                    {#if s.page_num && s.file?.toLowerCase().endsWith('.pdf')}
+                      <a
+                        href={pageHref(s)}
+                        class="source-page source-page-link"
+                        target="_blank"
+                        rel="noopener"
+                        title="Ouvrir le livret de règles à cette page">{pageLabel(s)} ↗</a
+                      >
+                    {:else if s.page_num}
+                      <span class="source-page">{pageLabel(s)}</span>
                     {/if}
                     <span class="source-score">{(s.score * 100).toFixed(0)}%</span>
                   </div>

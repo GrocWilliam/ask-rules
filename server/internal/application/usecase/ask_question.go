@@ -63,6 +63,8 @@ type RetrievedSection struct {
 	Content string  `json:"content"`
 	Score   float64 `json:"score"`
 	PageNum int     `json:"page_num"`
+	PageEnd int     `json:"page_end"`
+	File    string  `json:"file"` // chemin relatif servi par /files/{file}
 }
 
 // Execute exécute le use case : recherche le contexte, génère la réponse.
@@ -173,30 +175,51 @@ func (uc *AskQuestionUseCase) buildCacheKey(gameID, question string) string {
 }
 
 // buildContext construit le texte de contexte pour le LLM.
+// Chaque section indique sa page pour que le LLM puisse la citer.
 func (uc *AskQuestionUseCase) buildContext(sections []*entity.ScoredSection) string {
 	var builder strings.Builder
 	for i, sec := range sections {
 		if i > 0 {
 			builder.WriteString("\n\n")
 		}
-		builder.WriteString(fmt.Sprintf("Section %d: %s\n%s", i+1, sec.Title, sec.Text))
+		builder.WriteString(fmt.Sprintf("Section %d: %s", i+1, sec.Title))
+		if ref := pageRef(sec.PageStart, sec.PageEnd); ref != "" {
+			builder.WriteString(" (" + ref + ")")
+		}
+		builder.WriteString("\n" + sec.Text)
 	}
 	return builder.String()
+}
+
+// pageRef formate la page d'une section : "p. 4" ou "p. 4-5".
+func pageRef(start, end *int) string {
+	if start == nil || *start <= 0 {
+		return ""
+	}
+	if end != nil && *end > *start {
+		return fmt.Sprintf("p. %d-%d", *start, *end)
+	}
+	return fmt.Sprintf("p. %d", *start)
 }
 
 // mapSections convertit les sections du domaine en DTO.
 func (uc *AskQuestionUseCase) mapSections(sections []*entity.ScoredSection) []*RetrievedSection {
 	result := make([]*RetrievedSection, len(sections))
 	for i, sec := range sections {
-		pageNum := 0
+		pageNum, pageEnd := 0, 0
 		if sec.PageStart != nil {
 			pageNum = *sec.PageStart
+		}
+		if sec.PageEnd != nil {
+			pageEnd = *sec.PageEnd
 		}
 		result[i] = &RetrievedSection{
 			Title:   sec.Title,
 			Content: sec.Text,
 			Score:   sec.Score,
 			PageNum: pageNum,
+			PageEnd: pageEnd,
+			File:    sec.SourceFile,
 		}
 	}
 	return result

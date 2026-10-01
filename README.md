@@ -316,7 +316,7 @@ Si `libonnxruntime.so` ou le modèle est absent au démarrage, le serveur contin
 
 ### Évaluer la qualité du retrieval
 
-`server/cmd/eval` mesure Hit@k et MRR sur un jeu de questions annotées (`server/eval/questions.json`).
+`server/cmd/eval` mesure Hit@k, MRR et la justesse des numéros de page sur un jeu de questions annotées (`server/eval/questions.json`).
 Chaque question liste des extraits du livret attendus dans les sections renvoyées.
 
 ```bash

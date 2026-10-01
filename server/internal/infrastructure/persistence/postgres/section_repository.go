@@ -26,9 +26,9 @@ func (r *SectionRepositoryImpl) Insert(ctx context.Context, section *entity.Sect
 	query := `
 		INSERT INTO sections (
 			id, game_id, titre, type_section, contenu, resume, mecaniques, 
-			embedding, page_debut, page_fin, hierarchy_path, chunk_index, total_chunks
+			embedding, page_debut, page_fin, fichier_source, hierarchy_path, chunk_index, total_chunks
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 	`
 
 	// Garantir que Mechanics n'est jamais nil (contrainte NOT NULL)
@@ -54,6 +54,7 @@ func (r *SectionRepositoryImpl) Insert(ctx context.Context, section *entity.Sect
 		vec,
 		section.PageStart,
 		section.PageEnd,
+		section.SourceFile,
 		section.HierarchyPath,
 		section.ChunkIndex,
 		section.TotalChunks,
@@ -73,7 +74,7 @@ func (r *SectionRepositoryImpl) DeleteByGameID(ctx context.Context, gameID strin
 func (r *SectionRepositoryImpl) VectorSearch(ctx context.Context, gameID string, embedding []float64, limit int) ([]*entity.ScoredSection, error) {
 	query := `
 		SELECT id, game_id, titre, type_section, contenu, resume, 
-		       page_debut, page_fin,
+		       page_debut, page_fin, fichier_source,
 		       1 - (embedding <=> $1) AS score
 		FROM sections
 		WHERE game_id = $2
@@ -107,6 +108,7 @@ func (r *SectionRepositoryImpl) VectorSearch(ctx context.Context, gameID string,
 			&sec.Summary,
 			&sec.PageStart,
 			&sec.PageEnd,
+			&sec.SourceFile,
 			&sec.Score,
 		)
 		if err != nil {
@@ -123,7 +125,7 @@ func (r *SectionRepositoryImpl) VectorSearch(ctx context.Context, gameID string,
 func (r *SectionRepositoryImpl) FullTextSearch(ctx context.Context, gameID string, query string, limit int) ([]*entity.ScoredSection, error) {
 	sqlQuery := `
 		SELECT id, game_id, titre, type_section, contenu, resume,
-		       page_debut, page_fin,
+		       page_debut, page_fin, fichier_source,
 		       ts_rank(search_vector, websearch_to_tsquery('french', $1)) AS score
 		FROM sections
 		WHERE game_id = $2
@@ -151,6 +153,7 @@ func (r *SectionRepositoryImpl) FullTextSearch(ctx context.Context, gameID strin
 			&sec.Summary,
 			&sec.PageStart,
 			&sec.PageEnd,
+			&sec.SourceFile,
 			&sec.Score,
 		)
 		if err != nil {

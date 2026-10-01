@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -92,6 +94,18 @@ func main() {
 		}
 	}
 
+	// Pages de référence de chaque jeu, extraites indépendamment du pipeline
+	gamePages := map[string][]string{}
+	for _, g := range ds.Games {
+		for _, f := range g.Files {
+			pages, err := referencePages(filepath.Join(config.C.UploadsDir, f))
+			if err != nil {
+				log.Fatalf("pages de référence %s : %v", f, err)
+			}
+			gamePages[g.Name] = append(gamePages[g.Name], pages...)
+		}
+	}
+
 	gameIDs := map[string]string{}
 	for _, g := range ds.Games {
 		game, err := gameRepo.FindByName(ctx, g.Name)
@@ -102,6 +116,7 @@ func main() {
 	}
 
 	var hit1, hit3, hitK, vecHitK, empty int
+	var pageChecked, pageCorrect int
 	var mrr float64
 	var totalChars int
 	var totalLatency time.Duration
@@ -127,6 +142,16 @@ func main() {
 			totalChars += len(s.Text)
 			if rank == 0 && matches(s.Text, q.Expected) {
 				rank = i + 1
+				// La page attribuée à la section contient-elle l'extrait attendu ?
+				if want := expectedPages(gamePages[q.Game], q.Expected); len(want) > 0 {
+					pageChecked++
+					if pageInRange(want, s.PageStart, s.PageEnd) {
+						pageCorrect++
+					} else if *verbose {
+						failures = append(failures, fmt.Sprintf("✗ page [%s] %s : pages attendues %v, section p.%s",
+							q.Game, q.Question, want, formatRange(s.PageStart, s.PageEnd)))
+					}
+				}
 			}
 		}
 		switch {
@@ -172,6 +197,10 @@ func main() {
 	fmt.Printf("MRR@%d                : %.3f\n", *limit, mrr/n)
 	fmt.Printf("Hit@%d vectoriel seul : %s\n", *limit, pct(vecHitK))
 	fmt.Printf("Sans résultat        : %d\n", empty)
+	if pageChecked > 0 {
+		fmt.Printf("Page correcte        : %5.1f%% (%d/%d sections trouvées)\n",
+			100*float64(pageCorrect)/float64(pageChecked), pageCorrect, pageChecked)
+	}
 	fmt.Printf("Contexte moyen       : %d caractères\n", totalChars/len(ds.Questions))
 	fmt.Printf("Latence moyenne      : %s\n", (totalLatency / time.Duration(len(ds.Questions))).Round(time.Millisecond))
 
@@ -246,4 +275,67 @@ func describeFailure(q question, sections []*entity.ScoredSection) string {
 		fmt.Fprintf(&b, "    %d. (%.2f) %s…\n", i+1, s.Score, string(preview))
 	}
 	return b.String()
+}
+
+// referencePages renvoie le texte normalisé de chaque page (index i = page i+1).
+func referencePages(path string) ([]string, error) {
+	var raw string
+	if strings.EqualFold(filepath.Ext(path), ".pdf") {
+		out, err := exec.Command("pdftotext", "-enc", "UTF-8", path, "-").Output()
+		if err != nil {
+			return nil, err
+		}
+		raw = string(out)
+	} else {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, err
+		}
+		raw = string(data)
+	}
+	pages := strings.Split(raw, "\f")
+	for i, p := range pages {
+		pages[i] = normalizeText(p)
+	}
+	return pages, nil
+}
+
+// expectedPages renvoie les pages contenant l'un des extraits attendus.
+func expectedPages(pages []string, expected []string) []int {
+	var result []int
+	for i, p := range pages {
+		for _, e := range expected {
+			if strings.Contains(p, normalizeText(e)) {
+				result = append(result, i+1)
+				break
+			}
+		}
+	}
+	return result
+}
+
+func pageInRange(want []int, start, end *int) bool {
+	if start == nil {
+		return false
+	}
+	last := *start
+	if end != nil && *end > last {
+		last = *end
+	}
+	for _, p := range want {
+		if p >= *start && p <= last {
+			return true
+		}
+	}
+	return false
+}
+
+func formatRange(start, end *int) string {
+	if start == nil {
+		return "?"
+	}
+	if end != nil && *end > *start {
+		return fmt.Sprintf("%d-%d", *start, *end)
+	}
+	return fmt.Sprint(*start)
 }
