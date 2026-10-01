@@ -90,6 +90,11 @@ func Migrate(ctx context.Context) error {
 				ADD COLUMN IF NOT EXISTS total_chunks   INTEGER NOT NULL DEFAULT 1`,
 		},
 		{
+			"colonne fichier_source",
+			`ALTER TABLE sections
+				ADD COLUMN IF NOT EXISTS fichier_source TEXT NOT NULL DEFAULT ''`,
+		},
+		{
 			"colonne search_vector (migration existante)",
 			`ALTER TABLE sections
 				ADD COLUMN IF NOT EXISTS search_vector tsvector`,

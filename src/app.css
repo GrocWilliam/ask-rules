@@ -513,6 +513,17 @@ details[open] .sources-summary::before {
   white-space: nowrap;
 }
 
+.source-page-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.source-page-link:hover,
+.source-page-link:focus-visible {
+  background: rgba(124, 58, 237, 0.16);
+  text-decoration: underline;
+}
+
 .source-score {
   background: rgba(34, 197, 94, 0.1);
   border: 1px solid rgba(34, 197, 94, 0.2);

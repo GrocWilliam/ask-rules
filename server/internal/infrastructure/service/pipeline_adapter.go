@@ -143,19 +143,20 @@ func (p *PipelineAdapter) processFileStreaming(
 	absPath := storage.GetAbsolutePath(fp)
 
 	emit("extracting", map[string]interface{}{"file": fp})
-	text, pages, err := extractText(absPath)
-	fmt.Printf("Extracted text length: %d\n", len(text))
+	pages, err := extractText(absPath)
 	if err != nil {
 		return -1
 	}
-	if strings.TrimSpace(text) == "" {
+	textLength := 0
+	for _, pg := range pages {
+		textLength += len(pg.Text)
+	}
+	if textLength == 0 {
 		return -1
 	}
 
-	emit("chunking", map[string]interface{}{"file": fp, "text_length": len(text)})
-	chunks := chunkText(text, pages)
-
-	text = ""
+	emit("chunking", map[string]interface{}{"file": fp, "text_length": textLength})
+	chunks := chunkPages(pages)
 	pages = nil
 
 	emit("embedding", map[string]interface{}{"file": fp, "chunks": len(chunks)})
@@ -196,6 +197,7 @@ func (p *PipelineAdapter) processFileStreaming(
 			Embedding:     vecToFloat64(vec),
 			PageStart:     intPtr(chunk.PageStart),
 			PageEnd:       intPtr(chunk.PageEnd),
+			SourceFile:    fp,
 			HierarchyPath: sectionType,
 			ChunkIndex:    i,
 			TotalChunks:   len(chunks),
@@ -382,57 +384,83 @@ type chunk struct {
 	Position  int
 }
 
-func chunkText(text string, pages []pageInfo) []chunk {
-	text = cleanPDFArtifacts(text)
+// paragraph est un paragraphe avec les pages qu'il couvre.
+type paragraph struct {
+	Text      string
+	PageStart int
+	PageEnd   int
+}
 
-	if utf8.RuneCountInString(text) < minChunkSize {
-		return []chunk{{Text: text, PageStart: 1, PageEnd: len(pages), Position: 0}}
+// chunkPages découpe le document page par page : chaque paragraphe garde son
+// numéro de page, les chunks couvrent donc une plage de pages exacte.
+func chunkPages(pages []pageInfo) []chunk {
+	headers := repeatedHeaderLines(pages)
+
+	var paragraphs []paragraph
+	totalRunes := 0
+	for _, pg := range pages {
+		text := cleanPDFArtifacts(pg.Text, headers)
+		for _, para := range splitParagraphs(text) {
+			paragraphs = append(paragraphs, paragraph{Text: para, PageStart: pg.Number, PageEnd: pg.Number})
+			totalRunes += utf8.RuneCountInString(para)
+		}
+	}
+	if len(paragraphs) == 0 {
+		return nil
 	}
 
-	paragraphs := splitParagraphs(text)
+	if totalRunes < minChunkSize {
+		texts := make([]string, len(paragraphs))
+		for i, para := range paragraphs {
+			texts[i] = para.Text
+		}
+		return []chunk{{
+			Text:      strings.Join(texts, "\n\n"),
+			PageStart: paragraphs[0].PageStart,
+			PageEnd:   paragraphs[len(paragraphs)-1].PageEnd,
+		}}
+	}
+
 	paragraphs = mergeParagraphs(paragraphs, minParagraphSize)
 	paragraphs = mergeOrphanContinuations(paragraphs)
 
-	estimatedChunks := len(text) / (defaultChunkSize * 2)
-	if estimatedChunks < 10 {
-		estimatedChunks = 10
-	}
-	chunks := make([]chunk, 0, estimatedChunks)
+	chunks := make([]chunk, 0, totalRunes/defaultChunkSize+1)
 	var current strings.Builder
 	current.Grow(defaultChunkSize * 2)
+	currentLen := 0
+	pageStart, pageEnd := 0, 0
 	position := 0
 
 	flush := func() {
 		s := strings.TrimSpace(current.String())
 		if utf8.RuneCountInString(s) >= minChunkSize && !isLowQualityText(s) {
-			pageNum := resolvePageNumber(s, pages)
 			chunks = append(chunks, chunk{
 				Text:      s,
-				PageStart: pageNum,
-				PageEnd:   pageNum,
+				PageStart: pageStart,
+				PageEnd:   pageEnd,
 				Position:  position,
 			})
 			position++
 		}
 		current.Reset()
+		currentLen = 0
 	}
 
 	for _, para := range paragraphs {
-		para = strings.TrimSpace(para)
-		if para == "" {
+		text := strings.TrimSpace(para.Text)
+		if text == "" {
 			continue
 		}
-		if utf8.RuneCountInString(para) > defaultChunkSize*2 {
-			subChunks := splitLongParagraph(para, defaultChunkSize)
-			for _, sc := range subChunks {
+		paraLen := utf8.RuneCountInString(text)
+		if paraLen > defaultChunkSize*2 {
+			for _, sc := range splitLongParagraph(text, defaultChunkSize) {
 				if isLowQualityText(sc) {
 					continue
 				}
-				pageNum := resolvePageNumber(sc, pages)
 				chunks = append(chunks, chunk{
 					Text:      sc,
-					PageStart: pageNum,
-					PageEnd:   pageNum,
+					PageStart: para.PageStart,
+					PageEnd:   para.PageEnd,
 					Position:  position,
 				})
 				position++
@@ -440,24 +468,23 @@ func chunkText(text string, pages []pageInfo) []chunk {
 			continue
 		}
 
-		currentLen := utf8.RuneCountInString(current.String())
-		paraLen := utf8.RuneCountInString(para)
-
 		if currentLen+paraLen > defaultChunkSize && currentLen > 0 {
 			flush()
 		}
 
-		if current.Len() > 0 {
+		if currentLen == 0 {
+			pageStart = para.PageStart
+		} else {
 			current.WriteString("\n\n")
 		}
-		current.WriteString(para)
+		current.WriteString(text)
+		currentLen += paraLen
+		pageEnd = para.PageEnd
 	}
 
-	if current.Len() > 0 {
+	if currentLen > 0 {
 		flush()
 	}
-
-	paragraphs = nil
 
 	return chunks
 }
@@ -504,24 +531,25 @@ func splitParagraphs(text string) []string {
 	return paragraphs
 }
 
-func mergeOrphanContinuations(paragraphs []string) []string {
+func mergeOrphanContinuations(paragraphs []paragraph) []paragraph {
 	if len(paragraphs) == 0 {
 		return paragraphs
 	}
-	result := []string{paragraphs[0]}
+	result := []paragraph{paragraphs[0]}
 	for _, p := range paragraphs[1:] {
-		p = strings.TrimSpace(p)
-		if p == "" {
+		p.Text = strings.TrimSpace(p.Text)
+		if p.Text == "" {
 			continue
 		}
-		first := firstNonSpace(p)
-		prev := result[len(result)-1]
-		prevLast := lastNonSpace(prev)
+		first := firstNonSpace(p.Text)
+		prev := &result[len(result)-1]
+		prevLast := lastNonSpace(prev.Text)
 
 		startsLower := first >= 'a' && first <= 'z'
 		prevEndsOpen := !isSentenceEnd(prevLast)
 		if startsLower && prevEndsOpen {
-			result[len(result)-1] = prev + " " + p
+			prev.Text += " " + p.Text
+			prev.PageEnd = p.PageEnd
 			continue
 		}
 		result = append(result, p)
@@ -529,21 +557,22 @@ func mergeOrphanContinuations(paragraphs []string) []string {
 	return result
 }
 
-func mergeParagraphs(paragraphs []string, minSize int) []string {
+func mergeParagraphs(paragraphs []paragraph, minSize int) []paragraph {
 	if len(paragraphs) == 0 {
 		return paragraphs
 	}
-	var result []string
+	var result []paragraph
 	acc := paragraphs[0]
 	for _, p := range paragraphs[1:] {
-		if utf8.RuneCountInString(acc) < minSize {
-			acc = acc + " " + p
+		if utf8.RuneCountInString(acc.Text) < minSize {
+			acc.Text += " " + p.Text
+			acc.PageEnd = p.PageEnd
 		} else {
 			result = append(result, acc)
 			acc = p
 		}
 	}
-	if acc != "" {
+	if acc.Text != "" {
 		result = append(result, acc)
 	}
 	return result
@@ -642,8 +671,8 @@ func splitLongParagraph(text string, size int) []string {
 	return chunks
 }
 
-func cleanPDFArtifacts(text string) string {
-	text = removeRepeatedHeaderLines(text)
+func cleanPDFArtifacts(text string, headers map[string]bool) string {
+	text = removeLines(text, headers)
 	text = removeTOCLines(text)
 	for strings.Contains(text, "\n\n\n") {
 		text = strings.ReplaceAll(text, "\n\n\n", "\n\n")
@@ -651,39 +680,43 @@ func cleanPDFArtifacts(text string) string {
 	return strings.TrimSpace(text)
 }
 
-func removeRepeatedHeaderLines(text string) string {
-	lines := strings.Split(text, "\n")
+// repeatedHeaderLines repère les lignes courtes répétées sur tout le document
+// (en-têtes, pieds de page, mentions de copyright).
+func repeatedHeaderLines(pages []pageInfo) map[string]bool {
 	freq := make(map[string]int, 64)
-	for _, l := range lines {
-		t := strings.TrimSpace(l)
-		if t == "" {
-			continue
-		}
-		nr := utf8.RuneCountInString(t)
-		if nr >= 4 && nr <= 80 {
-			freq[t]++
+	for _, pg := range pages {
+		for _, l := range strings.Split(pg.Text, "\n") {
+			t := strings.TrimSpace(l)
+			if t == "" {
+				continue
+			}
+			nr := utf8.RuneCountInString(t)
+			if nr >= 4 && nr <= 80 {
+				freq[t]++
+			}
 		}
 	}
-	toRemove := make(map[string]bool)
+	headers := make(map[string]bool)
 	for line, count := range freq {
 		if count >= 5 {
-			toRemove[line] = true
+			headers[line] = true
 		}
 	}
+	return headers
+}
+
+func removeLines(text string, toRemove map[string]bool) string {
 	if len(toRemove) == 0 {
 		return text
 	}
-	var sb strings.Builder
-	sb.Grow(len(text))
+	lines := strings.Split(text, "\n")
+	kept := lines[:0]
 	for _, l := range lines {
-		t := strings.TrimSpace(l)
-		if toRemove[t] {
-			continue
+		if !toRemove[strings.TrimSpace(l)] {
+			kept = append(kept, l)
 		}
-		sb.WriteString(l)
-		sb.WriteByte('\n')
 	}
-	return sb.String()
+	return strings.Join(kept, "\n")
 }
 
 func removeTOCLines(text string) string {
@@ -720,22 +753,6 @@ func isTOCLine(s string) bool {
 		}
 	}
 	return leader
-}
-
-func resolvePageNumber(chunk string, pages []pageInfo) int {
-	if len(pages) == 0 {
-		return 1
-	}
-	preview := chunk
-	if len(preview) > 100 {
-		preview = preview[:100]
-	}
-	for _, p := range pages {
-		if strings.Contains(p.Text, preview) {
-			return p.Number
-		}
-	}
-	return pages[0].Number
 }
 
 // isLowQualityText checks whether the provided text is considered low quality based on several heuristics.
@@ -796,7 +813,7 @@ type pageInfo struct {
 	Text   string
 }
 
-func extractText(absPath string) (string, []pageInfo, error) {
+func extractText(absPath string) ([]pageInfo, error) {
 	ext := strings.ToLower(filepath.Ext(absPath))
 	switch ext {
 	case ".pdf":
@@ -804,37 +821,29 @@ func extractText(absPath string) (string, []pageInfo, error) {
 	case ".txt", ".md":
 		return extractTXT(absPath)
 	default:
-		return "", nil, fmt.Errorf("format non supporté: %s", ext)
+		return nil, fmt.Errorf("format non supporté: %s", ext)
 	}
 }
 
-func extractTXT(absPath string) (string, []pageInfo, error) {
+func extractTXT(absPath string) ([]pageInfo, error) {
 	data, err := os.ReadFile(absPath)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	text := string(data)
-	return text, []pageInfo{{Number: 1, Text: text}}, nil
+	text := strings.TrimSpace(string(data))
+	if text == "" {
+		return nil, nil
+	}
+	return []pageInfo{{Number: 1, Text: text}}, nil
 }
 
-func extractPDF(absPath string) (string, []pageInfo, error) {
+func extractPDF(absPath string) ([]pageInfo, error) {
 	cmd := exec.Command("pdftotext", "-enc", "UTF-8", absPath, "-")
 	out, err := cmd.Output()
 	if err != nil {
-		return "", nil, fmt.Errorf("pdftotext: %w (vérifiez que poppler-utils est installé)", err)
+		return nil, fmt.Errorf("pdftotext: %w (vérifiez que poppler-utils est installé)", err)
 	}
-
-	full := string(out)
-	pages := splitPerPage(full)
-
-	var sb strings.Builder
-	for i, p := range pages {
-		if i > 0 {
-			sb.WriteString("\n\n")
-		}
-		sb.WriteString(p.Text)
-	}
-	return sb.String(), pages, nil
+	return splitPerPage(string(out)), nil
 }
 
 func splitPerPage(text string) []pageInfo {
