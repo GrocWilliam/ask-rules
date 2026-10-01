@@ -32,7 +32,7 @@ func statusServer(t *testing.T, statuses ...int) (*httptest.Server, *int32) {
 func TestPostJSONWithRetry_RecoversAfter429(t *testing.T) {
 	srv, calls := statusServer(t, http.StatusTooManyRequests, http.StatusOK)
 
-	resp, err := postJSONWithRetry(context.Background(), srv.Client(), nil, "test", srv.URL, nil, []byte(`{}`))
+	resp, err := postJSONWithRetry(context.Background(), srv.Client(), nil, "test", srv.URL, nil, []byte(`{}`), llmMaxRetries)
 	if err != nil {
 		t.Fatalf("erreur inattendue : %v", err)
 	}
@@ -48,7 +48,7 @@ func TestPostJSONWithRetry_Persistent429IsRateLimited(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer cancel()
 
-	_, err := postJSONWithRetry(ctx, srv.Client(), nil, "test", srv.URL, nil, []byte(`{}`))
+	_, err := postJSONWithRetry(ctx, srv.Client(), nil, "test", srv.URL, nil, []byte(`{}`), llmMaxRetries)
 	if !errors.Is(err, entity.ErrLLMRateLimited) {
 		t.Fatalf("attendu ErrLLMRateLimited, obtenu %v", err)
 	}
@@ -60,7 +60,7 @@ func TestPostJSONWithRetry_Persistent429IsRateLimited(t *testing.T) {
 func TestPostJSONWithRetry_NoRetryOnClientError(t *testing.T) {
 	srv, calls := statusServer(t, http.StatusUnauthorized)
 
-	_, err := postJSONWithRetry(context.Background(), srv.Client(), nil, "test", srv.URL, nil, []byte(`{}`))
+	_, err := postJSONWithRetry(context.Background(), srv.Client(), nil, "test", srv.URL, nil, []byte(`{}`), llmMaxRetries)
 	if err == nil || errors.Is(err, entity.ErrLLMRateLimited) {
 		t.Fatalf("attendu une erreur 401 simple, obtenu %v", err)
 	}

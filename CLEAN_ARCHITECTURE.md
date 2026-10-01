@@ -100,8 +100,7 @@ server/
 │       │   ├── embedder/
 │       │   │   └── onnx_embedder.go
 │       │   ├── llm/
-│       │   │   ├── mistral_client.go
-│       │   │   └── openai_client.go
+│       │   │   └── mistral_client.go
 │       │   └── nlp/
 │       │       ├── section_detector.go
 │       │       └── gameplay_extractor.go

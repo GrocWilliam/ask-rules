@@ -19,11 +19,13 @@ type Config struct {
 	// LLM
 	MistralAPIKey string
 	MistralModel  string
-	OpenAIAPIKey  string
-	OpenAIModel   string
-	OllamaHost    string
-	OllamaModel   string
-	// LLMRequestsPerSecond : cadence max des appels Mistral/OpenAI (0 = illimitée)
+	// Plugsky : fournisseur de secours si Mistral échoue
+	PlugskyAPIKey  string
+	PlugskyModel   string
+	PlugskyBaseURL string
+	OllamaHost     string
+	OllamaModel    string
+	// LLMRequestsPerSecond : cadence max des appels Mistral (0 = illimitée)
 	LLMRequestsPerSecond float64
 
 	// Admin
@@ -56,8 +58,9 @@ func Load() error {
 		DatabaseURL:          getEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/ask-rules"),
 		MistralAPIKey:        getEnv("MISTRAL_API_KEY", ""),
 		MistralModel:         getEnv("MISTRAL_MODEL", "mistral-small-latest"),
-		OpenAIAPIKey:         getEnv("OPENAI_API_KEY", ""),
-		OpenAIModel:          getEnv("OPENAI_MODEL", "gpt-4o-mini"),
+		PlugskyAPIKey:        getEnv("PLUGSKY_API_KEY", ""),
+		PlugskyModel:         getEnv("PLUGSKY_MODEL", "plugsky-lite"),
+		PlugskyBaseURL:       getEnv("PLUGSKY_BASE_URL", "https://plugsky.com/v1"),
 		OllamaHost:           getEnv("OLLAMA_HOST", "http://localhost:11434"),
 		OllamaModel:          getEnv("OLLAMA_MODEL", ""),
 		LLMRequestsPerSecond: getEnvFloat("LLM_REQUESTS_PER_SECOND", 1),
