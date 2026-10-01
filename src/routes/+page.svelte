@@ -362,7 +362,7 @@
           {:else}
             <p class="no-llm-notice">
               Aucun LLM configuré. Ajoutez <code>MISTRAL_API_KEY</code>,
-              <code>OPENAI_API_KEY</code> ou <code>OLLAMA_MODEL</code> dans
+              <code>PLUGSKY_API_KEY</code> ou <code>OLLAMA_MODEL</code> dans
               <code>.env</code>.
             </p>
           {/if}

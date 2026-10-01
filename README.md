@@ -125,27 +125,28 @@ pnpm run dev:front      # Vite dev server pour SvelteKit
 
 ## Variables d'environnement
 
-| Variable                  | Défaut                                                    | Description                                                                                    |
-| ------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `ENV`                     | `development`                                             | Environnement (`development` ou `production`)                                                  |
-| `DATABASE_URL`            | `postgresql://postgres:postgres@localhost:5432/ask-rules` | PostgreSQL                                                                                     |
-| `PORT`                    | `3001`                                                    | Port d'écoute (8080 dans Docker)                                                               |
-| `MISTRAL_API_KEY`         | —                                                         | LLM Mistral (prioritaire si défini)                                                            |
-| `MISTRAL_MODEL`           | `mistral-small-latest`                                    | Modèle Mistral                                                                                 |
-| `OPENAI_API_KEY`          | —                                                         | LLM OpenAI                                                                                     |
-| `OPENAI_MODEL`            | `gpt-4o-mini`                                             | Modèle OpenAI                                                                                  |
-| `OLLAMA_HOST`             | `http://localhost:11434`                                  | Serveur Ollama                                                                                 |
-| `OLLAMA_MODEL`            | —                                                         | Modèle Ollama (ex: `llama3`)                                                                   |
-| `LLM_REQUESTS_PER_SECOND` | `1`                                                       | Cadence max des appels Mistral/OpenAI (0 = illimitée). Les 429/5xx sont réessayés avec backoff |
-| `ADMIN_PASSWORD`          | `admin`                                                   | Mot de passe interface admin                                                                   |
-| `REDIS_ENABLED`           | `false`                                                   | Activer le cache Redis                                                                         |
-| `REDIS_URL`               | `redis://localhost:6379`                                  | URL Redis                                                                                      |
-| `UPLOADS_DIR`             | `../uploads`                                              | Répertoire des fichiers uploadés                                                               |
-| `MODEL_PATH`              | `../models/multilingual-e5-small`                         | Chemin du modèle ONNX                                                                          |
-| `MODEL_QUANTIZED`         | `true`                                                    | Télécharger le modèle int8 (118 Mo) au lieu du fp32 (470 Mo)                                   |
-| `ONNX_THREADS`            | `2`                                                       | Threads ONNX Runtime par inférence                                                             |
+| Variable                  | Défaut                                                    | Description                                                                             |
+| ------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `ENV`                     | `development`                                             | Environnement (`development` ou `production`)                                           |
+| `DATABASE_URL`            | `postgresql://postgres:postgres@localhost:5432/ask-rules` | PostgreSQL                                                                              |
+| `PORT`                    | `3001`                                                    | Port d'écoute (8080 dans Docker)                                                        |
+| `MISTRAL_API_KEY`         | —                                                         | LLM Mistral (prioritaire si défini)                                                     |
+| `MISTRAL_MODEL`           | `mistral-small-latest`                                    | Modèle Mistral                                                                          |
+| `PLUGSKY_API_KEY`         | —                                                         | LLM de secours Plugsky, utilisé si Mistral échoue (quota, panne)                        |
+| `PLUGSKY_MODEL`           | `plugsky-lite`                                            | Modèle Plugsky                                                                          |
+| `PLUGSKY_BASE_URL`        | `https://plugsky.com/v1`                                  | URL de l'API Plugsky                                                                    |
+| `OLLAMA_HOST`             | `http://localhost:11434`                                  | Serveur Ollama                                                                          |
+| `OLLAMA_MODEL`            | —                                                         | Modèle Ollama (ex: `llama3`)                                                            |
+| `LLM_REQUESTS_PER_SECOND` | `1`                                                       | Cadence max des appels Mistral (0 = illimitée). Les 429/5xx sont réessayés avec backoff |
+| `ADMIN_PASSWORD`          | `admin`                                                   | Mot de passe interface admin                                                            |
+| `REDIS_ENABLED`           | `false`                                                   | Activer le cache Redis                                                                  |
+| `REDIS_URL`               | `redis://localhost:6379`                                  | URL Redis                                                                               |
+| `UPLOADS_DIR`             | `../uploads`                                              | Répertoire des fichiers uploadés                                                        |
+| `MODEL_PATH`              | `../models/multilingual-e5-small`                         | Chemin du modèle ONNX                                                                   |
+| `MODEL_QUANTIZED`         | `true`                                                    | Télécharger le modèle int8 (118 Mo) au lieu du fp32 (470 Mo)                            |
+| `ONNX_THREADS`            | `2`                                                       | Threads ONNX Runtime par inférence                                                      |
 
-**Priorité LLM** : Mistral → OpenAI → Ollama. Sans aucune clé, les réponses sont construites uniquement depuis le contexte récupéré (pas de génération).
+**Priorité LLM** : Mistral, avec bascule sur Plugsky en cas d'échec (quota atteint, panne) → Ollama si aucune clé Mistral/Plugsky. Sans aucune clé, les réponses sont construites uniquement depuis le contexte récupéré (pas de génération).
 
 **Note** : En `ENV=development`, le client Mistral ignore les erreurs TLS (InsecureSkipVerify).
 
