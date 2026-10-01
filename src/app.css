@@ -166,6 +166,34 @@ body {
   color: var(--text-faint);
 }
 
+.games-status {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.games-status small {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.games-retry-btn {
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--accent);
+  border-radius: 99px;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.6rem;
+}
+
+.games-retry-btn:hover,
+.games-retry-btn:focus-visible {
+  background: var(--accent);
+  color: #fff;
+}
+
 .submit-btn {
   display: flex;
   align-items: center;
