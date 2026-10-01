@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Mechanic représente une mécanique de jeu reconnue.
@@ -175,6 +176,33 @@ func ExtractKeywords(text string) []string {
 		}
 		if len(lw) >= 3 && !frenchStopwords[lw] {
 			result = append(result, lw)
+		}
+	}
+	return result
+}
+
+// ExtractSearchTerms extrait les termes de recherche plein texte d'une question.
+// Contrairement à ExtractKeywords, les accents sont conservés : les termes sont
+// destinés au stemmer 'french' de PostgreSQL, qui doit voir les mêmes mots
+// que ceux indexés.
+func ExtractSearchTerms(text string) []string {
+	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	seen := map[string]bool{}
+	var result []string
+	for _, w := range words {
+		if seen[w] {
+			continue
+		}
+		seen[w] = true
+		nw := normalize(w)
+		if gameNouns[w] || gameNouns[nw] {
+			result = append(result, w)
+			continue
+		}
+		if utf8.RuneCountInString(w) >= 3 && !frenchStopwords[w] && !frenchStopwords[nw] {
+			result = append(result, w)
 		}
 	}
 	return result

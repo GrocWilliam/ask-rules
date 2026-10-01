@@ -124,10 +124,10 @@ func (r *SectionRepositoryImpl) FullTextSearch(ctx context.Context, gameID strin
 	sqlQuery := `
 		SELECT id, game_id, titre, type_section, contenu, resume,
 		       page_debut, page_fin,
-		       ts_rank(search_vector, plainto_tsquery('french', $1)) AS score
+		       ts_rank(search_vector, websearch_to_tsquery('french', $1)) AS score
 		FROM sections
 		WHERE game_id = $2
-		  AND search_vector @@ plainto_tsquery('french', $1)
+		  AND search_vector @@ websearch_to_tsquery('french', $1)
 		ORDER BY score DESC
 		LIMIT $3
 	`

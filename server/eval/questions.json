@@ -1,0 +1,52 @@
+{
+  "games": [
+    { "name": "Defcon 1", "files": ["defcon-1/D1_Rules_FR.pdf"] },
+    { "name": "Anachrony", "files": ["anachrony/FRENCH_Anachrony.pdf"] },
+    { "name": "Dead Reckoning", "files": ["dead-reckoning/1772440043064_DeadReckoning_Deckhand_FR_1P_Rules_Rulebook_FIN.pdf"] }
+  ],
+  "questions": [
+    { "game": "Defcon 1", "question": "Combien de cartes mission peut-on garder en main ?", "expected": ["au maximum 3 cartes MISSION"] },
+    { "game": "Defcon 1", "question": "Peut-on avoir plusieurs unités dans la même zone ?", "expected": ["ne peut être occupée que par 1 unité"] },
+    { "game": "Defcon 1", "question": "Quelles sont les phases d'un tour de jeu ?", "expected": ["se décomposent en 5 phases"] },
+    { "game": "Defcon 1", "question": "Qu'est-ce qui fait monter le niveau DEFCON ?", "expected": ["Les actions qui augmentent la tension internationale sont"] },
+    { "game": "Defcon 1", "question": "À partir de quand peut-on lancer une bombe atomique ?", "expected": ["tirer des missiles nucléaires"] },
+    { "game": "Defcon 1", "question": "Comment activer une usine qui ne fonctionne pas ?", "expected": ["dépensant 2 cubes R&D"] },
+    { "game": "Defcon 1", "question": "Que devient une unité détruite au combat ?", "expected": ["retourne dans la réserve de son"] },
+    { "game": "Defcon 1", "question": "Quel bloc a l'initiative au premier tour ?", "expected": ["celui le plus influent"] },
+    { "game": "Defcon 1", "question": "Les non-alignés reçoivent-ils de l'uranium en début de partie ?", "expected": ["ne reçoit pas d'uranium"] },
+    { "game": "Defcon 1", "question": "Comment fonctionnent les détroits ?", "expected": ["considéré comme étant une voie terrestre"] },
+    { "game": "Defcon 1", "question": "Où mettre les marqueurs instabilité II pendant la mise en place ?", "expected": ["AUSTRALIA I, AUSTRALIA II"] },
+    { "game": "Defcon 1", "question": "Peut-on contrôler une mer ?", "expected": ["elle n'est jamais contrôlée"] },
+    { "game": "Defcon 1", "question": "Qui remporte la lutte d'influence en cas d'égalité des mises ?", "expected": ["de l'initiative la plus élevée remporte la lutte"] },
+    { "game": "Defcon 1", "question": "Combien coûte un missile pour un sous-marin SSBN ?", "expected": ["Dépensez 3 barils URANIUM"] },
+    { "game": "Defcon 1", "question": "Que peut-on faire pendant la phase recherche et développement ?", "expected": ["développer des technologies accessibles"] },
+    { "game": "Defcon 1", "question": "Comment est déterminé l'ordre du tour ?", "expected": ["en fonction du nombre de cubes INFLUENCE"] },
+
+    { "game": "Anachrony", "question": "Combien de tours dure une partie ?", "expected": ["(jusqu'à 7), appelés Époques"] },
+    { "game": "Anachrony", "question": "Quand l'astéroïde frappe-t-il ?", "expected": ["Après la quatrième Époque, un impact"] },
+    { "game": "Anachrony", "question": "Combien de points coûte une anomalie en fin de partie ?", "expected": ["fait perdre 3 Points de Victoire", "vaut -3 Points de Victoire"] },
+    { "game": "Anachrony", "question": "Que se passe-t-il quand on a trois paradoxes ?", "expected": ["troisième jeton Paradoxe est"] },
+    { "game": "Anachrony", "question": "Combien d'exosquelettes peut-on alimenter ?", "expected": ["Place jusqu'à 6 Exosquelettes", "mettre sous tension jusqu'à 6 Exosquelettes"] },
+    { "game": "Anachrony", "question": "Combien de jetons vortex peut-on poser par époque ?", "expected": ["de 0 à 2 jetons Vortex"] },
+    { "game": "Anachrony", "question": "Qui est le premier joueur ?", "expected": ["impression de \"déjà vu\""] },
+    { "game": "Anachrony", "question": "Combien d'eau reçoit chaque joueur au début ?", "expected": ["respectivement 0, 1, 1 et 2 Eaux"] },
+    { "game": "Anachrony", "question": "Quelles sont les phases d'une époque ?", "expected": ["Chaque Époque se décompose en 6 phases"] },
+    { "game": "Anachrony", "question": "Combien de cartes de condition de fin de partie utilise-t-on ?", "expected": ["choisissez au hasard 5 cartes Condition"] },
+    { "game": "Anachrony", "question": "Que fait-on à la fin d'une époque pendant le nettoyage ?", "expected": ["Les Ouvriers sont retirés des"] },
+    { "game": "Anachrony", "question": "Qui lance le dé paradoxe s'il y a égalité ?", "expected": ["tous les joueurs à égalité lancent"] },
+
+    { "game": "Dead Reckoning", "question": "Qu'est-ce qui déclenche la fin de la partie ?", "expected": ["en aura accompli quatre, la fin de la partie"] },
+    { "game": "Dead Reckoning", "question": "Combien de plateaux avec des îles à 3 joueurs ?", "expected": ["9 plateaux lors d'une partie à 3 joueurs"] },
+    { "game": "Dead Reckoning", "question": "De combien de cartes est composé le paquet de marins ?", "expected": ["1 paquet de 12 cartes marin"] },
+    { "game": "Dead Reckoning", "question": "Combien de cartes a-t-on en main au départ ?", "expected": ["piocher les quatre premières cartes"] },
+    { "game": "Dead Reckoning", "question": "Quel avantage a le quatrième joueur au démarrage ?", "expected": ["le 4e joueur, le cas échéant, gagne 2"] },
+    { "game": "Dead Reckoning", "question": "Comment se déroule un tour de jeu ?", "expected": ["Votre tour se compose de deux phases"] },
+    { "game": "Dead Reckoning", "question": "Puis-je déposer de la cargaison sur une île que je ne contrôle pas ?", "expected": ["décharger sur une île même si vous ne la contrôlez pas"] },
+    { "game": "Dead Reckoning", "question": "Combien de fois par tour peut-on hisser les voiles ?", "expected": ["Hisser les voiles (une fois par tour)"] },
+    { "game": "Dead Reckoning", "question": "Combien d'emplacements de coque a le navire ?", "expected": ["comporte quatre cases de coque"] },
+    { "game": "Dead Reckoning", "question": "Comment devenir pirate ?", "expected": ["hisser votre drapeau pirate"] },
+    { "game": "Dead Reckoning", "question": "Comment compte-t-on les points à la fin ?", "expected": ["DÉCOMPTE DES POINTS"] },
+    { "game": "Dead Reckoning", "question": "Que change le dernier tour d'un joueur pour l'influence sur les îles ?", "expected": ["nécessitent désormais deux actions"] },
+    { "game": "Dead Reckoning", "question": "Qui marque les pièces d'une île en fin de partie ?", "expected": ["Celui qui a le plus de cubes sur une île"] }
+  ]
+}

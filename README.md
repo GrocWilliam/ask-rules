@@ -141,6 +141,8 @@ pnpm run dev:front      # Vite dev server pour SvelteKit
 | `REDIS_URL`       | `redis://localhost:6379`                                  | URL Redis                                     |
 | `UPLOADS_DIR`     | `../uploads`                                              | Répertoire des fichiers uploadés              |
 | `MODEL_PATH`      | `../models/multilingual-e5-small`                         | Chemin du modèle ONNX                         |
+| `MODEL_QUANTIZED` | `true`                                                    | Télécharger le modèle int8 (118 Mo) au lieu du fp32 (470 Mo) |
+| `ONNX_THREADS`    | `2`                                                       | Threads ONNX Runtime par inférence            |
 
 **Priorité LLM** : Mistral → OpenAI → Ollama. Sans aucune clé, les réponses sont construites uniquement depuis le contexte récupéré (pas de génération).
 
@@ -291,11 +293,13 @@ volumes:
 
 ## Embeddings
 
-Le service `internal/infrastructure/service/embedder.go` charge le modèle **multilingual-e5-small** directement via `onnxruntime_go` (CGO). Aucun serveur Python requis.
+Le service `internal/infrastructure/service/onnx_embedder_adapter.go` charge le modèle **multilingual-e5-small** directement via `onnxruntime_go` (CGO). Aucun serveur Python requis.
 
-- **Dimensions** : 384
+- **Dimensions** : 384, jusqu'à 512 tokens
 - **Langue** : multilingue (optimal pour le français)
-- **Session ONNX** : Tensors pré-alloués, `copy()` avant chaque `Run()` — thread-safe
+- **Modèle quantifié int8** utilisé en priorité s'il est présent (`onnx/model_quantized.onnx`)
+- **Préfixes E5** : `query: ` pour les questions (`Embed`), `passage: ` pour les sections indexées (`EmbedPassage`)
+- **Session ONNX** : shapes dynamiques (tensors à la taille réelle du texte), arène mémoire désactivée, libérée après 5 min d'inactivité
 - **Repository pattern** : Interface `EmbedderService` dans domain, implémentation dans infrastructure
 
 Si `libonnxruntime.so` ou le modèle est absent au démarrage, le serveur continue sans embeddings (recherche full-text uniquement).
@@ -304,11 +308,24 @@ Si `libonnxruntime.so` ou le modèle est absent au démarrage, le serveur contin
 
 ## Recherche hybride
 
-`internal/infrastructure/service/retriever.go` combine :
+`internal/domain/service/retriever/retriever.go` combine :
 
 1. **Recherche vectorielle** — cosinus via `pgvector` (index HNSW)
-2. **Full-text search** — `plainto_tsquery('french', ...)` sur `tsvector` pondéré (titre A, hierarchy_path B, contenu C)
-3. **Fusion RRF** (Reciprocal Rank Fusion) — reclassement des deux listes avec `k=60`
+2. **Full-text search** — `websearch_to_tsquery('french', 'terme1 or terme2 ...')` sur `tsvector` pondéré (titre A, hierarchy_path B, contenu C)
+3. **Fusion RRF** (Reciprocal Rank Fusion) — reclassement des deux listes par rang uniquement avec `k=60`
+
+### Évaluer la qualité du retrieval
+
+`server/cmd/eval` mesure Hit@k et MRR sur un jeu de questions annotées (`server/eval/questions.json`).
+Chaque question liste des extraits du livret attendus dans les sections renvoyées.
+
+```bash
+cd server
+# Base dédiée : -index supprime et recrée les sections des jeux du dataset
+DATABASE_URL=postgresql://postgres:postgres@localhost:5433/askrules_eval go run ./cmd/eval -index -v
+```
+
+Relancer l'évaluation avant/après toute modification du chunking, du modèle ou du retriever.
 
 Les repositories PostgreSQL gèrent les requêtes SQL (separation of concerns), le retriever orchestre la fusion.
 

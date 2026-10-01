@@ -36,6 +36,8 @@ type Config struct {
 
 	// Embedder (chemin vers le modèle ONNX)
 	ModelPath string
+	// OnnxThreads : threads ONNX Runtime pour une inférence (peu = moins de RAM)
+	OnnxThreads int
 
 	Env string
 }
@@ -61,6 +63,7 @@ func Load() error {
 		RedisURL:      getEnv("REDIS_URL", "redis://localhost:6379"),
 		UploadsDir:    getEnv("UPLOADS_DIR", "../uploads"),
 		ModelPath:     getEnv("MODEL_PATH", "../models/multilingual-e5-small"),
+		OnnxThreads:   getEnvInt("ONNX_THREADS", 2),
 		Env:           getEnv("ENV", "production"),
 	}
 
@@ -93,4 +96,12 @@ func getEnvBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return b
+}
+
+func getEnvInt(key string, fallback int) int {
+	v, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }

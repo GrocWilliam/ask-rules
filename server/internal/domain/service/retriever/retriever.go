@@ -14,10 +14,15 @@ import (
 )
 
 const (
-	vectorWeight = 0.65
-	textWeight   = 0.35
 	defaultLimit = 4
-	minScore     = 0.50 // seuil de pertinence : seules les sections à ≥ 50% sont retenues
+	// rrfK : constante de Reciprocal Rank Fusion (valeur standard de la littérature).
+	rrfK = 60
+	// minCandidates : nombre minimum de candidats demandés à chaque recherche.
+	minCandidates = 20
+	// minVectorScore : similarité cosinus en dessous de laquelle un résultat
+	// uniquement vectoriel est écarté. E5 produit des cosinus élevés même pour
+	// des textes sans rapport (~0.7), le seuil ne filtre que le bruit évident.
+	minVectorScore = 0.72
 )
 
 // SearchOptions paramètres de recherche.
@@ -47,7 +52,7 @@ func Search(ctx context.Context, opts SearchOptions) ([]entity.ScoredSection, er
 		for i, f := range vec {
 			f64vec[i] = float64(f)
 		}
-		vr, err := opts.SectionRepo.VectorSearch(ctx, opts.GameID, f64vec, limit*2)
+		vr, err := opts.SectionRepo.VectorSearch(ctx, opts.GameID, f64vec, candidates(limit))
 		if err != nil {
 			log.Printf("[retriever] VectorSearch: %v", err)
 		} else {
@@ -63,7 +68,7 @@ func Search(ctx context.Context, opts SearchOptions) ([]entity.ScoredSection, er
 	// Recherche plein texte (OR sur les mots-clés)
 	keywords := buildSearchQuery(opts.Question)
 	if keywords != "" {
-		tr, err := opts.SectionRepo.FullTextSearch(ctx, opts.GameID, keywords, limit*2)
+		tr, err := opts.SectionRepo.FullTextSearch(ctx, opts.GameID, keywords, candidates(limit))
 		if err != nil {
 			log.Printf("[retriever] FullTextSearch: %v", err)
 		} else {
@@ -78,75 +83,63 @@ func Search(ctx context.Context, opts SearchOptions) ([]entity.ScoredSection, er
 	return merged, nil
 }
 
-// buildSearchQuery construit une requête to_tsquery avec OR (|) pour être permissif.
-// Chaque mot-clé est séparé par " | " : une section est retournée dès qu'elle
-// contient AU MOINS UN des mots-clés (classement par ts_rank ensuite).
-func buildSearchQuery(question string) string {
-	keywords := nlp.ExtractKeywords(question)
-	if len(keywords) == 0 {
-		// Fallback : tous les mots de la question (plainto_tsquery tolère n'importe quoi)
-		return question
+func candidates(limit int) int {
+	if limit*4 > minCandidates {
+		return limit * 4
 	}
-	// Prendre les 8 premiers mots-clés
-	if len(keywords) > 8 {
-		keywords = keywords[:8]
-	}
-	// Échapper les caractères spéciaux pour to_tsquery
-	for i, k := range keywords {
-		keywords[i] = strings.Map(func(r rune) rune {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-				return r
-			}
-			return -1 // supprimer tout caractère non alphanumérique
-		}, k)
-	}
-	// Filtrer les mots vides après nettoyage
-	var clean []string
-	for _, k := range keywords {
-		if len(k) >= 2 {
-			clean = append(clean, k)
-		}
-	}
-	if len(clean) == 0 {
-		return question
-	}
-	return strings.Join(clean, " | ")
+	return minCandidates
 }
 
-// mergeResults fusionne les résultats vectoriels et textuels avec pondération.
+// buildSearchQuery construit une requête websearch_to_tsquery en OR : une section
+// est retournée dès qu'elle contient AU MOINS UN des termes (classement par
+// ts_rank ensuite). Les accents sont conservés pour que le stemmer 'french'
+// produise les mêmes lexèmes que ceux indexés.
+func buildSearchQuery(question string) string {
+	terms := nlp.ExtractSearchTerms(question)
+	if len(terms) == 0 {
+		return question
+	}
+	if len(terms) > 8 {
+		terms = terms[:8]
+	}
+	return strings.Join(terms, " or ")
+}
+
+// mergeResults fusionne les deux classements par Reciprocal Rank Fusion.
+// Les scores bruts (cosinus vs ts_rank) ne sont pas comparables : seul le rang
+// compte. Le score final est ramené dans [0, 1] (1 = premier dans les deux listes).
 func mergeResults(vecResults, textResults []entity.ScoredSection, limit int) []entity.ScoredSection {
 	scores := map[string]float64{}
 	sectionMap := map[string]entity.ScoredSection{}
 
-	// Pondérer résultats vectoriels
 	for i, s := range vecResults {
-		rrScore := 1.0 / float64(i+1+10) // Reciprocal Rank Fusion
-		scores[s.ID] += vectorWeight * (s.Score + rrScore)
+		if s.Score < minVectorScore {
+			break // résultats triés par similarité décroissante
+		}
+		scores[s.ID] += 1.0 / float64(rrfK+i+1)
 		sectionMap[s.ID] = s
 	}
 
-	// Pondérer résultats textuels
 	for i, s := range textResults {
-		rrScore := 1.0 / float64(i+1+10)
-		scores[s.ID] += textWeight * (s.Score + rrScore)
+		scores[s.ID] += 1.0 / float64(rrfK+i+1)
 		if _, exists := sectionMap[s.ID]; !exists {
 			sectionMap[s.ID] = s
 		}
 	}
 
-	// Construire la liste triée
-	var merged []entity.ScoredSection
+	maxScore := 2.0 / float64(rrfK+1)
+	merged := make([]entity.ScoredSection, 0, len(scores))
 	for id, score := range scores {
-		if score < minScore {
-			continue
-		}
 		s := sectionMap[id]
-		s.Score = score
+		s.Score = score / maxScore
 		merged = append(merged, s)
 	}
 
 	sort.Slice(merged, func(i, j int) bool {
-		return merged[i].Score > merged[j].Score
+		if merged[i].Score != merged[j].Score {
+			return merged[i].Score > merged[j].Score
+		}
+		return merged[i].ID < merged[j].ID
 	})
 
 	if len(merged) > limit {
