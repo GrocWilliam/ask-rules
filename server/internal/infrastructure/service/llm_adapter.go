@@ -25,12 +25,29 @@ Règles importantes :
 - Structure ta réponse de façon claire avec des listes si nécessaire
 - Sois précis et concis`
 
+// llmMaxTokens : longueur max d'une réponse (~750 mots), largement suffisante
+// pour une règle de jeu. Limite aussi la consommation du quota de tokens.
+const llmMaxTokens = 1024
+
 // MistralLLMAdapter implémente LLMService avec support Mistral/OpenAI/Ollama.
-type MistralLLMAdapter struct{}
+type MistralLLMAdapter struct {
+	client *http.Client // partagé : réutilise les connexions TLS
+	pacer  *pacer       // cadence les appels aux API hébergées (Mistral, OpenAI)
+}
 
 // NewMistralLLM crée un nouvel adapter pour le service LLM.
 func NewMistralLLM() service.LLMService {
-	return &MistralLLMAdapter{}
+	return &MistralLLMAdapter{
+		client: &http.Client{
+			Timeout: 60 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: config.C.Env == "development", // Permet d'ignorer les erreurs TLS en dev
+				},
+			},
+		},
+		pacer: newPacer(config.C.LLMRequestsPerSecond),
+	}
 }
 
 // Query génère une réponse à partir de la question et du contexte fourni.
@@ -118,43 +135,19 @@ func (m *MistralLLMAdapter) queryMistral(ctx context.Context, question, ctxText 
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: prompt},
 		},
-		MaxTokens:   4096,
+		MaxTokens:   llmMaxTokens,
 		Temperature: 0.3,
 	}
 
 	body, _ := json.Marshal(reqBody)
 
-	req, err := http.NewRequestWithContext(ctx, "POST",
+	resp, err := postJSONWithRetry(ctx, m.client, m.pacer, "mistral",
 		"https://api.mistral.ai/v1/chat/completions",
-		bytes.NewReader(body))
+		map[string]string{"Authorization": "Bearer " + config.C.MistralAPIKey}, body)
 	if err != nil {
 		return entity.LLMResponse{}, err
 	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+config.C.MistralAPIKey)
-
-	client := &http.Client{
-		Timeout: 60 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: config.C.Env == "development", // Permet d'ignorer les erreurs TLS en dev
-			},
-		},
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return entity.LLMResponse{}, fmt.Errorf("mistral: %w", err)
-	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		b, _ := io.ReadAll(resp.Body)
-		return entity.LLMResponse{}, fmt.Errorf("mistral status %d: %s", resp.StatusCode, b)
-	}
-
-	fmt.Printf("[DEBUG] Mistral response status: %d\n", resp.StatusCode)
 
 	var result mistralResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -207,30 +200,19 @@ func (m *MistralLLMAdapter) queryOpenAI(ctx context.Context, question, ctxText s
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: prompt},
 		},
-		MaxTokens:   4096,
+		MaxTokens:   llmMaxTokens,
 		Temperature: 0.3,
 	}
 	body, _ := json.Marshal(reqBody)
 	fmt.Printf("[DEBUG] OpenAI request body: %s\n", string(body))
 
-	req, err := http.NewRequestWithContext(ctx, "POST",
+	resp, err := postJSONWithRetry(ctx, m.client, m.pacer, "openai",
 		"https://api.openai.com/v1/chat/completions",
-		bytes.NewReader(body))
+		map[string]string{"Authorization": "Bearer " + config.C.OpenAIAPIKey}, body)
 	if err != nil {
 		return entity.LLMResponse{}, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+config.C.OpenAIAPIKey)
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return entity.LLMResponse{}, fmt.Errorf("openai: %w", err)
-	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		b, _ := io.ReadAll(resp.Body)
-		return entity.LLMResponse{}, fmt.Errorf("openai status %d: %s", resp.StatusCode, b)
-	}
 	var result openAIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return entity.LLMResponse{}, err
@@ -271,7 +253,7 @@ func (m *MistralLLMAdapter) queryOllama(ctx context.Context, question, ctxText s
 		Model:      config.C.OllamaModel,
 		Prompt:     prompt,
 		Stream:     false,
-		NumPredict: 4096,
+		NumPredict: llmMaxTokens,
 	}
 	body, _ := json.Marshal(reqBody)
 	fmt.Printf("[DEBUG] Ollama request body: %s\n", string(body))

@@ -3,6 +3,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -44,13 +45,19 @@ func (h *AskHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 // handleError convertit les erreurs métier en codes HTTP appropriés.
 func (h *AskHandler) handleError(w http.ResponseWriter, err error) {
-	switch err {
-	case entity.ErrGameNotFound:
+	// errors.Is : le use case enveloppe les erreurs (fmt.Errorf("...: %w"))
+	switch {
+	case errors.Is(err, entity.ErrGameNotFound):
 		log.Printf("[ERROR] /api/ask - Game not found: %v", err)
-		h.respondError(w, http.StatusNotFound, err.Error())
-	case entity.ErrNoSectionsFound:
+		h.respondError(w, http.StatusNotFound, entity.ErrGameNotFound.Error())
+	case errors.Is(err, entity.ErrNoSectionsFound):
 		log.Printf("[ERROR] /api/ask - No sections found: %v", err)
 		h.respondError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, entity.ErrLLMRateLimited):
+		log.Printf("[WARN] /api/ask - LLM rate limited: %v", err)
+		w.Header().Set("Retry-After", "10")
+		h.respondError(w, http.StatusServiceUnavailable,
+			"Le service de réponse est très sollicité. Réessayez dans quelques secondes.")
 	default:
 		log.Printf("[ERROR] /api/ask - Internal error: %v", err)
 		h.respondError(w, http.StatusInternalServerError, "Internal server error")

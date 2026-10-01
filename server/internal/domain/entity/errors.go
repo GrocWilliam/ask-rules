@@ -14,4 +14,8 @@ var (
 
 	// ErrNoSectionsFound est retourné quand aucune section pertinente n'est trouvée.
 	ErrNoSectionsFound = errors.New("no relevant sections found")
+
+	// ErrLLMRateLimited est retourné quand le fournisseur LLM refuse la requête
+	// pour dépassement de quota (HTTP 429), même après plusieurs tentatives.
+	ErrLLMRateLimited = errors.New("llm rate limited")
 )
