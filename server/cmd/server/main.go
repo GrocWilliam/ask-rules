@@ -20,8 +20,6 @@ import (
 	// Interfaces HTTP
 	"ask-rules-server/internal/interfaces/http/handler"
 	"ask-rules-server/internal/interfaces/http/router"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -32,14 +30,11 @@ func main() {
 
 	// 1. Initialiser la base de données
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, config.C.DatabaseURL)
-	if err != nil {
+	if err := db.Connect(); err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
-	defer pool.Close()
-
-	// Assigner le pool global pour les migrations
-	db.Pool = pool
+	defer db.Close()
+	pool := db.Pool
 
 	// Exécuter les migrations automatiques
 	log.Println("Applying database migrations...")

@@ -4,7 +4,11 @@ set -eu
 echo "[boot] Starting standalone backend container"
 
 MODEL_DIR="${MODEL_PATH:-/app/models/multilingual-e5-small}"
-MODEL_FILE="$MODEL_DIR/onnx/model.onnx"
+if [ "${MODEL_QUANTIZED:-true}" = "true" ]; then
+  MODEL_FILE="$MODEL_DIR/onnx/model_quantized.onnx"
+else
+  MODEL_FILE="$MODEL_DIR/onnx/model.onnx"
+fi
 TOKENIZER_FILE="$MODEL_DIR/tokenizer.json"
 AUTO_DOWNLOAD="${MODEL_AUTO_DOWNLOAD:-true}"
 

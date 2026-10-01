@@ -19,7 +19,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-const maxUploadSize = 50 << 20 // 50 MB
+const (
+	maxUploadSize   = 50 << 20 // 50 MB
+	maxMemoryUpload = 8 << 20  // 8 MB gardés en RAM, le reste sur disque
+)
 
 // slugify convertit un texte en slug (copié depuis usecase/helpers.go pour éviter import cyclique)
 func slugify(s string) string {
@@ -270,7 +273,8 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 
 	// Parser le formulaire multipart
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+	// Au-delà de maxMemoryUpload, les fichiers sont écrits dans des fichiers temporaires
+	if err := r.ParseMultipartForm(maxMemoryUpload); err != nil {
 		log.Printf("[ERROR] /api/import - File too large or parse error: %v", err)
 		sendError("File too large (max 50 MB)")
 		return

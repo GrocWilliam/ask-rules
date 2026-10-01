@@ -174,7 +174,7 @@ func (p *PipelineAdapter) processFileStreaming(
 			continue
 		}
 
-		vec, embErr := p.embedder.Embed(ctx, cleanText)
+		vec, embErr := p.embedder.EmbedPassage(ctx, cleanText)
 		if embErr != nil {
 			emit("section_error", map[string]interface{}{"index": i, "error": "embedding: " + embErr.Error()})
 			vec = nil
@@ -370,7 +370,7 @@ func extractFirstSentence(s string, maxRunes int) string {
 // ──────────────────────────────────────────────────────────────────────────────
 
 const (
-	defaultChunkSize = 1200
+	defaultChunkSize = 700
 	minChunkSize     = 150
 	minParagraphSize = 40
 )

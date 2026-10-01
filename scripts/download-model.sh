@@ -4,6 +4,10 @@
 # Usage :
 #   ./scripts/download-model.sh                     # → models/multilingual-e5-small/
 #   ./scripts/download-model.sh /chemin/custom      # répertoire cible personnalisé
+#   MODEL_QUANTIZED=false ./scripts/download-model.sh  # modèle fp32 (470 Mo au lieu de 118 Mo)
+#
+# Par défaut, le modèle quantifié int8 (export Xenova du même modèle) est utilisé :
+# ~4x moins de RAM pour une perte de qualité négligeable.
 #
 # Prérequis : curl, unzip (ou python3 avec huggingface_hub en fallback)
 
@@ -11,7 +15,6 @@ set -euo pipefail
 
 DEST="${1:-models/multilingual-e5-small}"
 REPO="intfloat/multilingual-e5-small"
-BASE_URL="https://huggingface.co/${REPO}/resolve/main"
 
 # Fichiers nécessaires pour l'inférence ONNX
 FILES=(
@@ -20,8 +23,15 @@ FILES=(
   "tokenizer_config.json"
   "special_tokens_map.json"
   "sentencepiece.bpe.model"
-  "onnx/model.onnx"
 )
+
+QUANTIZED_REPO="Xenova/multilingual-e5-small"
+if [[ "${MODEL_QUANTIZED:-true}" == "true" ]]; then
+  # Préfixe "repo|" : fichier pris dans un autre dépôt que ${REPO}
+  FILES+=("${QUANTIZED_REPO}|onnx/model_quantized.onnx")
+else
+  FILES+=("onnx/model.onnx")
+fi
 
 echo "📥 Téléchargement de ${REPO}"
 echo "   Destination : ${DEST}"
@@ -29,8 +39,15 @@ echo ""
 
 mkdir -p "${DEST}/onnx"
 
-for FILE in "${FILES[@]}"; do
-  URL="${BASE_URL}/${FILE}"
+for ENTRY in "${FILES[@]}"; do
+  if [[ "${ENTRY}" == *"|"* ]]; then
+    FILE_REPO="${ENTRY%%|*}"
+    FILE="${ENTRY#*|}"
+  else
+    FILE_REPO="${REPO}"
+    FILE="${ENTRY}"
+  fi
+  URL="https://huggingface.co/${FILE_REPO}/resolve/main/${FILE}"
   OUT="${DEST}/${FILE}"
   # Créer le sous-dossier si nécessaire
   mkdir -p "$(dirname "${OUT}")"
@@ -74,7 +91,7 @@ for FILE in "${FILES[@]}"; do
       echo "    → Tentative via huggingface_hub Python..."
       python3 -c "
 from huggingface_hub import hf_hub_download
-hf_hub_download(repo_id='${REPO}', filename='${FILE}', local_dir='${DEST}')
+hf_hub_download(repo_id='${FILE_REPO}', filename='${FILE}', local_dir='${DEST}')
 print('    ✔ OK')
 " || { echo "    ✖ Échec. Vérifiez votre connexion ou installez : pip install huggingface_hub"; exit 1; }
     else
