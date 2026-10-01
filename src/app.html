@@ -20,12 +20,7 @@
         try {
           var c = localStorage.getItem('cookie_consent');
           if (c === 'granted') {
-            gtag('consent', 'update', {
-              analytics_storage: 'granted',
-              ad_storage: 'granted',
-              ad_user_data: 'granted',
-              ad_personalization: 'granted'
-            });
+            gtag('consent', 'update', { analytics_storage: 'granted' });
           }
         } catch (e) {}
       })();
@@ -43,10 +38,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Reglomatic" />
     %sveltekit.head%
-    <script
-      async
-      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-4646157012195573"
-      crossorigin="anonymous"></script>
   </head>
   <body data-sveltekit-preload-data="hover">
     <div style="display: contents">%sveltekit.body%</div>

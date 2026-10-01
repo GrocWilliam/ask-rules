@@ -16,12 +16,7 @@
     try {
       localStorage.setItem('cookie_consent', 'granted');
       // @ts-ignore
-      window.gtag?.('consent', 'update', {
-        analytics_storage: 'granted',
-        ad_storage: 'granted',
-        ad_user_data: 'granted',
-        ad_personalization: 'granted',
-      });
+      window.gtag?.('consent', 'update', { analytics_storage: 'granted' });
       // Déclencher la vue de page maintenant que le consentement est accordé
       // @ts-ignore
       window.gtag?.('event', 'page_view');
