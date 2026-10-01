@@ -160,6 +160,9 @@ func Migrate(ctx context.Context) error {
 		},
 
 		// ── Backfill search_vector pour les sections existantes ───────────────
+		// Uniquement les lignes sans search_vector : le trigger ci-dessous le
+		// maintient ensuite. Sans ce filtre, chaque démarrage réécrivait toute
+		// la table (et ses index), ce qui rallongeait le réveil du backend.
 		{
 			"backfill search_vector avec mecaniques",
 			`UPDATE sections
@@ -167,7 +170,8 @@ func Migrate(ctx context.Context) error {
 					setweight(to_tsvector('french', coalesce(titre, '')), 'A') ||
 					setweight(to_tsvector('french', coalesce(hierarchy_path, '')), 'B') ||
 					setweight(to_tsvector('french', coalesce(array_to_string(mecaniques, ' '), '')), 'B') ||
-					setweight(to_tsvector('french', coalesce(contenu, '')), 'C')`,
+					setweight(to_tsvector('french', coalesce(contenu, '')), 'C')
+				WHERE search_vector IS NULL`,
 		},
 
 		// ── Trigger de mise à jour automatique du search_vector ───────────────

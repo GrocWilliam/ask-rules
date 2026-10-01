@@ -2,6 +2,7 @@
   import type { PageData } from './$types';
   import SEO from '$lib/SEO.svelte';
   import Markdown from '$lib/Markdown.svelte';
+  import type { Game } from '../types/game.type';
 
   export let data: PageData;
 
@@ -52,7 +53,23 @@
 
   const MAX_QUESTION_LENGTH = 500;
 
-  $: filteredGames = data.games.filter((g: any) =>
+  // Liste des jeux chargée en arrière-plan (le backend peut être en train de se réveiller)
+  let games: Game[] = [];
+  let gamesStatus: 'loading' | 'ready' | 'error' = 'loading';
+  $: resolveGames(data.games);
+
+  async function resolveGames(promise: Promise<Game[]>) {
+    gamesStatus = 'loading';
+    try {
+      games = await promise;
+      gamesStatus = 'ready';
+    } catch {
+      games = [];
+      gamesStatus = 'error';
+    }
+  }
+
+  $: filteredGames = games.filter((g: any) =>
     (g.name ?? '').toLowerCase().includes(gameSearch.toLowerCase())
   );
 
@@ -194,7 +211,11 @@
     </div>
 
     <div class="form-footer">
-      {#if data.games.length > 1}
+      {#if gamesStatus === 'loading'}
+        <span class="game-label empty">⏳ Démarrage du serveur…</span>
+      {:else if gamesStatus === 'error'}
+        <span class="game-label empty">Serveur indisponible, rechargez la page</span>
+      {:else if games.length > 1}
         <div class="game-search-wrapper">
           <input
             bind:this={gameInputEl}
@@ -235,8 +256,8 @@
             </ul>
           {/if}
         </div>
-      {:else if data.games.length === 1}
-        <span class="game-label">🎲 {data.games[0].name}</span>
+      {:else if games.length === 1}
+        <span class="game-label">🎲 {games[0].name}</span>
       {:else}
         <span class="game-label empty">Aucun jeu indexé</span>
       {/if}
@@ -244,7 +265,7 @@
       <button
         type="submit"
         class="submit-btn{isLoading ? ' loading' : ''}"
-        disabled={isLoading || data.games.length === 0}
+        disabled={isLoading || games.length === 0}
       >
         {#if isLoading}
           <span class="spinner" aria-hidden="true"></span>Recherche…
@@ -354,11 +375,9 @@
 
   <!-- Footer -->
   <footer class="footer">
-    {#if data.games.length > 0}
+    {#if games.length > 0}
       <span
-        >{data.games.length} jeu{data.games.length > 1 ? 'x' : ''} indexé{data.games.length > 1
-          ? 's'
-          : ''}</span
+        >{games.length} jeu{games.length > 1 ? 'x' : ''} indexé{games.length > 1 ? 's' : ''}</span
       >
     {/if}
     <span class="version">v{__APP_VERSION__}</span>
