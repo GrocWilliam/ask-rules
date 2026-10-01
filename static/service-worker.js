@@ -1,10 +1,21 @@
 /// <reference lib="webworker" />
 
-const CACHE_NAME = 'reglomatic-v2'; // Version incrémentée pour forcer la mise à jour
+const CACHE_NAME = 'reglomatic-v3'; // Version incrémentée pour forcer la mise à jour
 const OFFLINE_URL = '/';
 
 // Liste des fichiers à mettre en cache lors de l'installation
-const STATIC_ASSETS = ['/', '/manifest.json', '/icon-192.png', '/icon-512.png'];
+const STATIC_ASSETS = [
+  '/',
+  '/manifest.json',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-maskable-512.png',
+  '/apple-touch-icon.png',
+  '/favicon.svg',
+];
+
+// Chemins jamais mis en cache : données dynamiques et fichiers volumineux (PDF de règles)
+const NO_CACHE_PREFIXES = ['/api/', '/files/', '/health'];
 
 const self = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (globalThis.self));
 
@@ -21,8 +32,8 @@ self.addEventListener('install', (event) => {
         console.error('[SW] Erreur lors de la mise en cache:', error);
       }
 
-      // Force l'activation immédiate
-      await self.skipWaiting();
+      // Pas de skipWaiting() ici : une mise à jour attend l'accord de
+      // l'utilisateur (message SKIP_WAITING envoyé par pwa-register.js)
     })()
   );
 });
@@ -60,11 +71,14 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Ignorer les requêtes API (SSE, streaming, JSON dynamique)
-  // Cela évite les problèmes avec Server-Sent Events et les requêtes dynamiques
+  // Ignorer les requêtes vers d'autres origines, l'API (SSE, JSON dynamique),
+  // les fichiers uploadés (PDF jusqu'à 50 Mo) et le health check
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api/')) {
-    return; // Laisser le navigateur gérer directement les requêtes API
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+  if (NO_CACHE_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
+    return;
   }
 
   // Ignorer les requêtes avec Accept: text/event-stream (SSE)
