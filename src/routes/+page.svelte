@@ -3,20 +3,19 @@
   import SEO from '$lib/SEO.svelte';
   import Markdown from '$lib/Markdown.svelte';
   import type { Game } from '../types/game.type';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import { gamesProgress, loadGames } from '$lib/gamesLoader';
+  import {
+    conversations,
+    addExchange,
+    deleteConversation,
+    clearConversations,
+    contextTurns,
+    type Exchange,
+    type SectionResult,
+  } from '$lib/chatHistory';
 
   export let data: PageData;
-
-  // Résultat de la dernière requête envoyée au Go backend
-  type SectionResult = {
-    title: string;
-    content: string;
-    score: number;
-    page_num: number | null;
-    page_end?: number | null;
-    file?: string;
-  };
 
   function pageHref(s: SectionResult): string {
     const path = (s.file ?? '').split('/').map(encodeURIComponent).join('/');
@@ -29,25 +28,13 @@
       : `p.${s.page_num}`;
   }
 
-  type FormResult =
-    | {
-        ok: true;
-        game: string;
-        answer: string;
-        model: string;
-        sections: SectionResult[];
-        cached: boolean;
-        file_path: string[] | null;
-      }
-    | { ok: false; error: string }
-    | null;
-
-  let form: FormResult = null;
   let isLoading = false;
+  let pendingQuestion = '';
+  let pendingGame = '';
   let selectedGame = '';
   let selectedGameLabel = '';
-  let lastQuestion = '';
   let formEl: HTMLFormElement;
+  let threadEndEl: HTMLElement;
   let questionText = '';
   let gameSearch = '';
   let showGameDropdown = false;
@@ -90,11 +77,19 @@
     (g.name ?? '').toLowerCase().includes(gameSearch.toLowerCase())
   );
 
+  // Conversation affichée (null = nouvelle conversation)
+  let currentId: string | null = null;
+  $: current = $conversations.find((c) => c.id === currentId);
+  $: currentFiles =
+    [...(current?.exchanges ?? [])].reverse().find((e) => e.file_path?.length)?.file_path ?? null;
+
   function selectGame(name: string) {
     selectedGame = name;
     selectedGameLabel = name;
     gameSearch = name;
     showGameDropdown = false;
+    // Le contexte d'une conversation est propre à un jeu
+    if (current && current.game !== name) currentId = null;
   }
 
   function clearGame() {
@@ -102,6 +97,48 @@
     selectedGameLabel = '';
     gameSearch = '';
     showGameDropdown = false;
+    currentId = null;
+  }
+
+  function newConversation() {
+    currentId = null;
+    questionText = '';
+  }
+
+  function openConversation(id: string) {
+    const conversation = $conversations.find((c) => c.id === id);
+    if (!conversation) return;
+    currentId = id;
+    selectedGame = conversation.game;
+    selectedGameLabel = conversation.game;
+    gameSearch = conversation.game;
+    historyOpen = false;
+  }
+
+  function removeConversation(id: string) {
+    deleteConversation(id);
+    if (id === currentId) currentId = null;
+  }
+
+  function clearHistory() {
+    if (confirm('Effacer tout l’historique des conversations ?')) {
+      clearConversations();
+      currentId = null;
+    }
+  }
+
+  let historyOpen = false;
+
+  const dateFormat = new Intl.DateTimeFormat('fr-FR', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  async function scrollToEnd() {
+    await tick();
+    threadEndEl?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }
 
   function handleGameInputFocus() {
@@ -150,34 +187,46 @@
     const question = textarea?.value?.trim() ?? '';
     if (!question) return;
 
-    isLoading = true;
-    lastQuestion = question;
-    form = null;
+    const game = selectedGame || (games.length === 1 ? games[0].name : '');
+    // Conversation figée au moment de l'envoi : la réponse y est ajoutée même
+    // si l'utilisateur change de jeu entre-temps
+    const conversationId = current?.game === game ? currentId : null;
+    const history = conversationId ? contextTurns(current) : [];
 
+    currentId = conversationId;
+    isLoading = true;
+    pendingQuestion = question;
+    pendingGame = game;
+    questionText = '';
+    scrollToEnd();
+
+    let exchange: Exchange = { question, at: Date.now() };
     try {
       const res = await fetch('/api/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, game: selectedGame }),
+        body: JSON.stringify({ question, game, history }),
       });
       const data = await res.json();
       if (!res.ok) {
-        form = { ok: false, error: data.error ?? 'Erreur serveur' };
+        exchange.error = data.error ?? 'Erreur serveur';
       } else {
-        form = {
-          ok: true,
-          game: data.game,
+        exchange = {
+          ...exchange,
           answer: data.answer,
           model: data.model,
-          sections: data.sections,
+          sections: data.sections ?? [],
           cached: data.cached,
           file_path: data.file_path,
         };
       }
     } catch (err) {
-      form = { ok: false, error: 'Erreur réseau — vérifiez votre connexion.' };
+      exchange.error = 'Erreur réseau — vérifiez votre connexion.';
     } finally {
+      currentId = addExchange(conversationId, game, exchange);
       isLoading = false;
+      pendingQuestion = '';
+      scrollToEnd();
     }
   }
 </script>
@@ -195,26 +244,187 @@
     <p class="tagline">Posez une question sur vos règles de jeu de société</p>
   </header>
 
+  <!-- Historique des conversations -->
+  {#if $conversations.length > 0}
+    <details class="history-details" bind:open={historyOpen}>
+      <summary class="history-summary">
+        Historique · {$conversations.length} conversation{$conversations.length > 1 ? 's' : ''}
+      </summary>
+      <ul class="history-list">
+        {#each $conversations as c (c.id)}
+          <li class="history-item" class:active={c.id === currentId}>
+            <button
+              type="button"
+              class="history-open"
+              on:click={() => openConversation(c.id)}
+              disabled={isLoading}
+            >
+              <span class="history-question">{c.exchanges[0]?.question}</span>
+              <span class="history-meta">
+                🎲 {c.game} · {c.exchanges.length} question{c.exchanges.length > 1 ? 's' : ''} ·
+                {dateFormat.format(c.updatedAt)}
+              </span>
+            </button>
+            <button
+              type="button"
+              class="history-delete"
+              title="Supprimer cette conversation"
+              aria-label="Supprimer cette conversation"
+              on:click={() => removeConversation(c.id)}
+              disabled={isLoading}>×</button
+            >
+          </li>
+        {/each}
+      </ul>
+      <button type="button" class="history-clear" on:click={clearHistory} disabled={isLoading}>
+        Effacer l’historique
+      </button>
+    </details>
+  {/if}
+
+  <!-- Conversation en cours -->
+  {#if current || pendingQuestion}
+    <section class="result-section" aria-live="polite">
+      <div class="conversation-header">
+        <div class="game-badge">
+          <span class="game-icon">🎲</span>
+          <span>{current?.game ?? pendingGame}</span>
+        </div>
+        {#if current}
+          <button
+            type="button"
+            class="new-conversation-btn"
+            on:click={newConversation}
+            disabled={isLoading}
+          >
+            + Nouvelle conversation
+          </button>
+        {/if}
+      </div>
+
+      <!-- Lien(s) de téléchargement du fichier source -->
+      {#if currentFiles}
+        <div class="file-download">
+          {#each currentFiles as filePath, index (filePath)}
+            <a href="/files/{filePath}" class="file-download-link" target="_blank" rel="noopener">
+              <span class="file-icon">📄</span>
+              <span class="file-text">
+                <span class="file-label">
+                  {currentFiles.length > 1 ? `Fichier source ${index + 1}` : 'Fichier source'}
+                </span>
+                <span class="file-name">
+                  {filePath.split('/').pop()?.replace(/^\d+_/, '') || 'Télécharger'}
+                </span>
+              </span>
+              <span class="file-arrow">↓</span>
+            </a>
+          {/each}
+        </div>
+      {/if}
+
+      {#each current?.exchanges ?? [] as exchange, index (index)}
+        <article class="exchange">
+          <p class="question-reminder">« {exchange.question} »</p>
+          {#if exchange.error}
+            <div class="error-card" role="alert">
+              <span class="error-icon">⚠</span>
+              <div>
+                <div class="error-message">{exchange.error}</div>
+              </div>
+            </div>
+          {:else}
+            <!-- Réponse LLM -->
+            <div class="answer-card">
+              {#if exchange.model}
+                <div class="answer-header">
+                  Réponse
+                  <span class="model-tag">{exchange.model}</span>
+                </div>
+                <div class="answer-text">
+                  <Markdown content={exchange.answer ?? ''} />
+                </div>
+              {:else}
+                <p class="no-llm-notice">
+                  Aucun LLM configuré. Ajoutez <code>LLM_BASE_URL</code> dans
+                  <code>.env</code>.
+                </p>
+              {/if}
+            </div>
+
+            <!-- Sections source -->
+            <details class="sources-details">
+              <summary class="sources-summary">
+                {exchange.sections?.length ?? 0} section{(exchange.sections?.length ?? 0) > 1
+                  ? 's'
+                  : ''} source
+              </summary>
+              <div class="sources-list">
+                {#each exchange.sections ?? [] as s, i (i)}
+                  <div class="source-card">
+                    <div class="source-header">
+                      <span class="source-title">{s.title}</span>
+                      <div class="source-meta">
+                        {#if s.page_num && s.file?.toLowerCase().endsWith('.pdf')}
+                          <a
+                            href={pageHref(s)}
+                            class="source-page source-page-link"
+                            target="_blank"
+                            rel="noopener"
+                            title="Ouvrir le livret de règles à cette page">{pageLabel(s)} ↗</a
+                          >
+                        {:else if s.page_num}
+                          <span class="source-page">{pageLabel(s)}</span>
+                        {/if}
+                        <span class="source-score">{(s.score * 100).toFixed(0)}%</span>
+                      </div>
+                    </div>
+                    <p class="source-text">
+                      {s.content.slice(0, 220) + '…'}
+                    </p>
+                  </div>
+                {/each}
+              </div>
+            </details>
+          {/if}
+        </article>
+      {/each}
+
+      {#if pendingQuestion}
+        <article class="exchange">
+          <p class="question-reminder">« {pendingQuestion} »</p>
+          <div class="answer-card pending">
+            <span class="spinner" aria-hidden="true"></span>Recherche dans les règles…
+          </div>
+        </article>
+      {/if}
+      <div bind:this={threadEndEl}></div>
+    </section>
+  {/if}
+
   <!-- Formulaire -->
   <form bind:this={formEl} class="ask-form" on:submit|preventDefault={handleSubmit}>
-    <div class="suggested-tags">
-      {#each suggestedQuestions as question, index (index)}
-        <button
-          type="button"
-          class="tag-btn"
-          on:click={() => fillQuestion(question)}
-          disabled={isLoading}
-        >
-          {question}
-        </button>
-      {/each}
-    </div>
+    {#if !current}
+      <div class="suggested-tags">
+        {#each suggestedQuestions as question, index (index)}
+          <button
+            type="button"
+            class="tag-btn"
+            on:click={() => fillQuestion(question)}
+            disabled={isLoading}
+          >
+            {question}
+          </button>
+        {/each}
+      </div>
+    {/if}
 
     <div class="question-wrapper">
       <textarea
         name="question"
         class="question-input"
-        placeholder="Ex : Comment se déroule un combat ? Combien de joueurs ?"
+        placeholder={current
+          ? 'Question de suivi : Et à deux joueurs ? Et en fin de partie ?'
+          : 'Ex : Comment se déroule un combat ? Combien de joueurs ?'}
         required
         rows="3"
         maxlength={MAX_QUESTION_LENGTH}
@@ -307,102 +517,6 @@
     </div>
   </form>
 
-  <!-- Résultats -->
-  {#if form}
-    <section class="result-section" aria-live="polite">
-      {#if !form.ok}
-        <div class="error-card" role="alert">
-          <span class="error-icon">⚠</span>
-          <div>
-            <div class="error-message">{form.error}</div>
-          </div>
-        </div>
-      {:else}
-        <!-- Question posée -->
-        {#if lastQuestion}
-          <p class="question-reminder">« {lastQuestion} »</p>
-        {/if}
-
-        <!-- Jeu sélectionné -->
-        <div class="game-badge">
-          <span class="game-icon">🎲</span>
-          <span>{selectedGame}</span>
-        </div>
-
-        <!-- Lien(s) de téléchargement du fichier source -->
-        {#if form.file_path}
-          <div class="file-download">
-            {#each form.file_path as filePath, index (filePath)}
-              <a href="/files/{filePath}" class="file-download-link" target="_blank" rel="noopener">
-                <span class="file-icon">📄</span>
-                <span class="file-text">
-                  <span class="file-label">
-                    {form.file_path.length > 1 ? `Fichier source ${index + 1}` : 'Fichier source'}
-                  </span>
-                  <span class="file-name">
-                    {filePath.split('/').pop()?.replace(/^\d+_/, '') || 'Télécharger'}
-                  </span>
-                </span>
-                <span class="file-arrow">↓</span>
-              </a>
-            {/each}
-          </div>
-        {/if}
-
-        <!-- Réponse LLM -->
-        <div class="answer-card">
-          {#if form.model}
-            <div class="answer-header">
-              Réponse
-              <span class="model-tag">{form.model}</span>
-            </div>
-            <div class="answer-text">
-              <Markdown content={form.answer} />
-            </div>
-          {:else}
-            <p class="no-llm-notice">
-              Aucun LLM configuré. Ajoutez <code>LLM_BASE_URL</code> dans
-              <code>.env</code>.
-            </p>
-          {/if}
-        </div>
-
-        <!-- Sections source -->
-        <details class="sources-details">
-          <summary class="sources-summary">
-            {form.sections.length} section{form.sections.length > 1 ? 's' : ''} source
-          </summary>
-          <div class="sources-list">
-            {#each form.sections as s, i (i)}
-              <div class="source-card">
-                <div class="source-header">
-                  <span class="source-title">{s.title}</span>
-                  <div class="source-meta">
-                    {#if s.page_num && s.file?.toLowerCase().endsWith('.pdf')}
-                      <a
-                        href={pageHref(s)}
-                        class="source-page source-page-link"
-                        target="_blank"
-                        rel="noopener"
-                        title="Ouvrir le livret de règles à cette page">{pageLabel(s)} ↗</a
-                      >
-                    {:else if s.page_num}
-                      <span class="source-page">{pageLabel(s)}</span>
-                    {/if}
-                    <span class="source-score">{(s.score * 100).toFixed(0)}%</span>
-                  </div>
-                </div>
-                <p class="source-text">
-                  {s.content.slice(0, 220) + '…'}
-                </p>
-              </div>
-            {/each}
-          </div>
-        </details>
-      {/if}
-    </section>
-  {/if}
-
   <!-- Footer -->
   <footer class="footer">
     {#if games.length > 0}
@@ -415,6 +529,141 @@
 </div>
 
 <style>
+  /* ── Conversation ─────────────────────────────────────── */
+
+  .conversation-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .new-conversation-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.8rem;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition:
+      color 0.15s,
+      border-color 0.15s;
+  }
+
+  .new-conversation-btn:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+
+  .exchange {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    animation: fadeIn 0.3s ease;
+  }
+
+  .answer-card.pending {
+    display: flex;
+    align-items: center;
+    color: var(--text-muted);
+  }
+
+  /* ── Historique ───────────────────────────────────────── */
+
+  .history-details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+  }
+
+  .history-summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+
+  .history-list {
+    list-style: none;
+    margin: 0.75rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  .history-item {
+    display: flex;
+    align-items: center;
+    border-radius: var(--radius-sm);
+  }
+
+  .history-item:hover,
+  .history-item.active {
+    background: var(--surface-2);
+  }
+
+  .history-open {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0.5rem 0.6rem;
+    color: var(--text);
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .history-question {
+    font-size: 0.92rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .history-meta {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+
+  .history-delete {
+    background: none;
+    border: none;
+    color: var(--text-faint);
+    font-size: 1.2rem;
+    line-height: 1;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+  }
+
+  .history-delete:hover:not(:disabled) {
+    color: var(--red);
+  }
+
+  .history-clear {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-family: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .history-clear:hover:not(:disabled) {
+    color: var(--red);
+  }
+
   .suggested-tags {
     display: flex;
     flex-wrap: wrap;

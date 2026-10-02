@@ -275,8 +275,14 @@ volumes:
 **Body `/api/ask`** :
 
 ```json
-{ "question": "Comment gagner ?", "gameName": "Catan" }
+{
+  "question": "Et à deux joueurs ?",
+  "game": "Catan",
+  "history": [{ "question": "Comment gagner ?", "answer": "Le premier à 10 points… (p. 4)" }]
+}
 ```
+
+`history` (optionnel) : échanges précédents de la conversation, du plus ancien au plus récent. Le serveur n'en garde que les 3 derniers (questions tronquées à 500 caractères, réponses à 2000), les rejoue au LLM et ajoute la question précédente à la recherche pour comprendre les questions de suivi. Une question avec historique ne passe pas par le cache. Côté interface, les conversations sont conservées dans le `localStorage` du navigateur (30 au plus).
 
 ### Admin (cookie `admin_session` requis)
 
