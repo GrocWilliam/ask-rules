@@ -86,14 +86,15 @@ func main() {
 
 	// 7. Configurer le routeur Chi
 	r := router.NewRouter(&router.Config{
-		AskHandler:       askHandler,
-		GamesHandler:     gamesHandler,
-		ImportHandler:    importHandler,
-		AdminHandler:     adminHandler,
-		LogsHandler:      logsHandler,
-		FilesHandler:     filesHandler,
-		AdminAuthUseCase: adminAuthUseCase,
-		LLMWarmup:        llmSvc.Warmup,
+		AskHandler:            askHandler,
+		GamesHandler:          gamesHandler,
+		ImportHandler:         importHandler,
+		AdminHandler:          adminHandler,
+		LogsHandler:           logsHandler,
+		FilesHandler:          filesHandler,
+		AdminAuthUseCase:      adminAuthUseCase,
+		AskRateLimitPerMinute: config.C.AskRateLimitPerMinute,
+		LLMWarmup:             llmSvc.Warmup,
 	})
 
 	// 8. Démarrer le serveur

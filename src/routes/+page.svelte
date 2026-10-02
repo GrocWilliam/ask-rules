@@ -5,6 +5,11 @@
   import type { Game } from '../types/game.type';
   import { onDestroy, tick } from 'svelte';
   import { gamesProgress, loadGames } from '$lib/gamesLoader';
+  import { askStream } from '$lib/askStream';
+  import { fileHref, linkCitations } from '$lib/citations';
+  import { detectGame } from '$lib/gameMatch';
+  import { keepScreenOn } from '$lib/wakeLock';
+  import VoiceInput from '$lib/VoiceInput.svelte';
   import {
     conversations,
     addExchange,
@@ -18,8 +23,7 @@
   export let data: PageData;
 
   function pageHref(s: SectionResult): string {
-    const path = (s.file ?? '').split('/').map(encodeURIComponent).join('/');
-    return `/files/${path}#page=${s.page_num}`;
+    return fileHref(s.file ?? '', s.page_num ?? 1);
   }
 
   function pageLabel(s: SectionResult): string {
@@ -31,6 +35,9 @@
   let isLoading = false;
   let pendingQuestion = '';
   let pendingGame = '';
+  // Réponse en cours de génération (streaming)
+  let pendingAnswer = '';
+  let gameError = '';
   let selectedGame = '';
   let selectedGameLabel = '';
   let formEl: HTMLFormElement;
@@ -54,6 +61,7 @@
     try {
       games = await promise;
       gamesStatus = 'ready';
+      restoreGame();
     } catch (error) {
       games = [];
       gamesError = error instanceof Error ? error.message : '';
@@ -83,11 +91,36 @@
   $: currentFiles =
     [...(current?.exchanges ?? [])].reverse().find((e) => e.file_path?.length)?.file_path ?? null;
 
+  // Jeu en cours mémorisé : on le choisit une fois pour toute la partie
+  const GAME_KEY = 'ask-rules:game';
+
+  function rememberGame(name: string) {
+    try {
+      if (name) localStorage.setItem(GAME_KEY, name);
+      else localStorage.removeItem(GAME_KEY);
+    } catch {
+      // stockage indisponible : sans conséquence
+    }
+  }
+
+  function restoreGame() {
+    if (selectedGame) return;
+    let saved: string | null = null;
+    try {
+      saved = localStorage.getItem(GAME_KEY);
+    } catch {
+      return;
+    }
+    if (saved && games.some((g) => g.name === saved)) selectGame(saved);
+  }
+
   function selectGame(name: string) {
     selectedGame = name;
     selectedGameLabel = name;
     gameSearch = name;
     showGameDropdown = false;
+    gameError = '';
+    rememberGame(name);
     // Le contexte d'une conversation est propre à un jeu
     if (current && current.game !== name) currentId = null;
   }
@@ -98,6 +131,7 @@
     gameSearch = '';
     showGameDropdown = false;
     currentId = null;
+    rememberGame('');
   }
 
   function newConversation() {
@@ -108,10 +142,8 @@
   function openConversation(id: string) {
     const conversation = $conversations.find((c) => c.id === id);
     if (!conversation) return;
+    selectGame(conversation.game);
     currentId = id;
-    selectedGame = conversation.game;
-    selectedGameLabel = conversation.game;
-    gameSearch = conversation.game;
     historyOpen = false;
     scrollToEnd();
   }
@@ -140,6 +172,28 @@
   async function scrollToEnd() {
     await tick();
     scrollEl?.scrollTo({ top: scrollEl.scrollHeight, behavior: 'smooth' });
+  }
+
+  // Pendant le streaming, suivre la réponse sauf si l'utilisateur est remonté lire
+  async function followAnswer() {
+    if (!scrollEl) return;
+    const nearBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 120;
+    await tick();
+    if (nearBottom) scrollEl.scrollTop = scrollEl.scrollHeight;
+  }
+
+  // Écran allumé tant qu'une partie est en cours
+  $: keepScreenOn(!!current || isLoading);
+  onDestroy(() => keepScreenOn(false));
+
+  // Dictée : le texte dicté complète ce qui était déjà saisi
+  let voiceBase = '';
+  function handleVoiceStart() {
+    voiceBase = questionText.trim() ? questionText.trim() + ' ' : '';
+  }
+  function handleVoiceTranscript(text: string, final: boolean) {
+    questionText = (voiceBase + text).slice(0, MAX_QUESTION_LENGTH);
+    if (final && text) formEl.requestSubmit();
   }
 
   function handleGameInputFocus() {
@@ -184,11 +238,25 @@
 
   async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
-    const textarea = formEl.querySelector('textarea[name="question"]') as HTMLTextAreaElement;
-    const question = textarea?.value?.trim() ?? '';
+    // questionText plutôt que la valeur du DOM : la dictée peut l'avoir modifié
+    // juste avant l'envoi, avant la mise à jour du champ
+    const question = questionText.trim();
     if (!question) return;
 
+    // Jeu : sélectionné, unique, ou cité dans la question
+    const detected = selectedGame
+      ? null
+      : detectGame(
+          question,
+          games.map((g) => g.name)
+        );
+    if (detected) selectGame(detected);
     const game = selectedGame || (games.length === 1 ? games[0].name : '');
+    if (!game) {
+      gameError = 'Choisissez d’abord le jeu auquel vous jouez.';
+      gameInputEl?.focus();
+      return;
+    }
     // Conversation figée au moment de l'envoi : la réponse y est ajoutée même
     // si l'utilisateur change de jeu entre-temps
     const conversationId = current?.game === game ? currentId : null;
@@ -198,36 +266,32 @@
     isLoading = true;
     pendingQuestion = question;
     pendingGame = game;
+    pendingAnswer = '';
     questionText = '';
     scrollToEnd();
 
     let exchange: Exchange = { question, at: Date.now() };
     try {
-      const res = await fetch('/api/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, game, history }),
+      const data = await askStream({ question, game, history }, (text) => {
+        pendingAnswer += text;
+        followAnswer();
       });
-      const data = await res.json();
-      if (!res.ok) {
-        exchange.error = data.error ?? 'Erreur serveur';
-      } else {
-        exchange = {
-          ...exchange,
-          answer: data.answer,
-          model: data.model,
-          sections: data.sections ?? [],
-          cached: data.cached,
-          file_path: data.file_path,
-        };
-      }
+      exchange = {
+        ...exchange,
+        answer: data.answer,
+        model: data.model,
+        sections: data.sections ?? [],
+        cached: data.cached,
+        file_path: data.file_path,
+      };
     } catch (err) {
-      exchange.error = 'Erreur réseau — vérifiez votre connexion.';
+      exchange.error = err instanceof Error ? err.message : 'Erreur serveur';
     } finally {
       currentId = addExchange(conversationId, game, exchange);
       isLoading = false;
       pendingQuestion = '';
-      scrollToEnd();
+      pendingAnswer = '';
+      followAnswer();
     }
   }
 </script>
@@ -344,7 +408,7 @@
                     <span class="model-tag">{exchange.model}</span>
                   </div>
                   <div class="answer-text">
-                    <Markdown content={exchange.answer ?? ''} />
+                    <Markdown content={linkCitations(exchange.answer ?? '', exchange.sections)} />
                   </div>
                 {:else}
                   <p class="no-llm-notice">
@@ -395,9 +459,17 @@
         {#if pendingQuestion}
           <article class="exchange">
             <p class="question-reminder">« {pendingQuestion} »</p>
-            <div class="answer-card pending">
-              <span class="spinner" aria-hidden="true"></span>Recherche dans les règles…
-            </div>
+            {#if pendingAnswer}
+              <div class="answer-card">
+                <div class="answer-text">
+                  <Markdown content={pendingAnswer} />
+                </div>
+              </div>
+            {:else}
+              <div class="answer-card pending">
+                <span class="spinner" aria-hidden="true"></span>Recherche dans les règles…
+              </div>
+            {/if}
           </article>
         {/if}
       </section>
@@ -435,6 +507,11 @@
         bind:value={questionText}
         on:keydown={handleTextareaKeydown}
       ></textarea>
+      <VoiceInput
+        disabled={isLoading}
+        onstart={handleVoiceStart}
+        ontranscript={handleVoiceTranscript}
+      />
       <div class="char-counter" class:warning={isNearLimit} class:danger={isAtLimit}>
         {charCount} / {MAX_QUESTION_LENGTH}
       </div>
@@ -465,7 +542,8 @@
             bind:this={gameInputEl}
             type="text"
             class="game-search-input"
-            placeholder="Tous les jeux (auto)"
+            placeholder="Choisir le jeu…"
+            aria-invalid={gameError ? 'true' : undefined}
             autocomplete="off"
             disabled={isLoading}
             bind:value={gameSearch}
@@ -518,6 +596,9 @@
         {/if}
       </button>
     </div>
+    {#if gameError}
+      <p class="game-error" role="alert">{gameError}</p>
+    {/if}
   </form>
 
   <!-- Footer -->
@@ -597,6 +678,28 @@
     .page.chat .header {
       padding: 0.5rem 0 0;
     }
+  }
+
+  .question-wrapper .question-input {
+    padding-right: 3.25rem; /* place du bouton micro */
+  }
+
+  .game-error {
+    margin: 0;
+    color: var(--red);
+    font-size: 0.85rem;
+  }
+
+  .game-search-input[aria-invalid='true'] {
+    border-color: var(--red);
+  }
+
+  /* Citations de pages cliquables dans les réponses */
+  .answer-text :global(a.citation) {
+    color: #c4b5fd;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    white-space: nowrap;
   }
 
   /* ── Conversation ─────────────────────────────────────── */

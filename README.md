@@ -125,26 +125,27 @@ pnpm run dev:front      # Vite dev server pour SvelteKit
 
 ## Variables d'environnement
 
-| Variable                   | Défaut                                                    | Description                                                                                                                                                                            |
-| -------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENV`                      | `development`                                             | Environnement (`development` ou `production`)                                                                                                                                          |
-| `DATABASE_URL`             | `postgresql://postgres:postgres@localhost:5432/ask-rules` | PostgreSQL                                                                                                                                                                             |
-| `PORT`                     | `3001`                                                    | Port d'écoute (8080 dans Docker)                                                                                                                                                       |
-| `LLM_BASE_URL`             | —                                                         | API compatible OpenAI du LLM principal, sans `/chat/completions` (ex : `http://llama.railway.internal:8080/v1`, `https://api.mistral.ai/v1`)                                           |
-| `LLM_API_KEY`              | —                                                         | Clé d'API (optionnelle pour llama.cpp sans `--api-key`)                                                                                                                                |
-| `LLM_MODEL`                | —                                                         | Modèle (optionnel pour llama.cpp)                                                                                                                                                      |
-| `LLM_TIMEOUT_SECONDS`      | `60`                                                      | Délai max d'une requête, tentatives comprises                                                                                                                                          |
-| `LLM_REQUESTS_PER_SECOND`  | `0`                                                       | Cadence max (0 = illimitée ; `1` pour l'offre gratuite Mistral). Les 429/5xx sont réessayés avec backoff                                                                               |
-| `LLM_HEALTH_URL`           | —                                                         | Endpoint de santé d'un LLM pouvant être mis en veille (llama.cpp : `http://<hôte>/health`). S'il ne répond pas, le LLM est réveillé en arrière-plan et la question part sur le secours |
-| `LLM_WAKE_TIMEOUT_SECONDS` | `300`                                                     | Durée max du réveil en arrière-plan                                                                                                                                                    |
-| `LLM_FALLBACK_*`           | —                                                         | Mêmes variables (`BASE_URL`, `API_KEY`, `MODEL`, `TIMEOUT_SECONDS`, `REQUESTS_PER_SECOND`, `HEALTH_URL`, `WAKE_TIMEOUT_SECONDS`) pour le LLM de secours                                |
-| `ADMIN_PASSWORD`           | `admin`                                                   | Mot de passe interface admin                                                                                                                                                           |
-| `REDIS_ENABLED`            | `false`                                                   | Activer le cache Redis                                                                                                                                                                 |
-| `REDIS_URL`                | `redis://localhost:6379`                                  | URL Redis                                                                                                                                                                              |
-| `UPLOADS_DIR`              | `../uploads`                                              | Répertoire des fichiers uploadés                                                                                                                                                       |
-| `MODEL_PATH`               | `../models/multilingual-e5-small`                         | Chemin du modèle ONNX                                                                                                                                                                  |
-| `MODEL_QUANTIZED`          | `true`                                                    | Télécharger le modèle int8 (118 Mo) au lieu du fp32 (470 Mo)                                                                                                                           |
-| `ONNX_THREADS`             | `2`                                                       | Threads ONNX Runtime par inférence                                                                                                                                                     |
+| Variable                    | Défaut                                                    | Description                                                                                                                                                                            |
+| --------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENV`                       | `development`                                             | Environnement (`development` ou `production`)                                                                                                                                          |
+| `DATABASE_URL`              | `postgresql://postgres:postgres@localhost:5432/ask-rules` | PostgreSQL                                                                                                                                                                             |
+| `PORT`                      | `3001`                                                    | Port d'écoute (8080 dans Docker)                                                                                                                                                       |
+| `LLM_BASE_URL`              | —                                                         | API compatible OpenAI du LLM principal, sans `/chat/completions` (ex : `http://llama.railway.internal:8080/v1`, `https://api.mistral.ai/v1`)                                           |
+| `LLM_API_KEY`               | —                                                         | Clé d'API (optionnelle pour llama.cpp sans `--api-key`)                                                                                                                                |
+| `LLM_MODEL`                 | —                                                         | Modèle (optionnel pour llama.cpp)                                                                                                                                                      |
+| `LLM_TIMEOUT_SECONDS`       | `60`                                                      | Délai max d'une requête, tentatives comprises                                                                                                                                          |
+| `LLM_REQUESTS_PER_SECOND`   | `0`                                                       | Cadence max (0 = illimitée ; `1` pour l'offre gratuite Mistral). Les 429/5xx sont réessayés avec backoff                                                                               |
+| `LLM_HEALTH_URL`            | —                                                         | Endpoint de santé d'un LLM pouvant être mis en veille (llama.cpp : `http://<hôte>/health`). S'il ne répond pas, le LLM est réveillé en arrière-plan et la question part sur le secours |
+| `LLM_WAKE_TIMEOUT_SECONDS`  | `300`                                                     | Durée max du réveil en arrière-plan                                                                                                                                                    |
+| `LLM_FALLBACK_*`            | —                                                         | Mêmes variables (`BASE_URL`, `API_KEY`, `MODEL`, `TIMEOUT_SECONDS`, `REQUESTS_PER_SECOND`, `HEALTH_URL`, `WAKE_TIMEOUT_SECONDS`) pour le LLM de secours                                |
+| `ADMIN_PASSWORD`            | `admin`                                                   | Mot de passe interface admin                                                                                                                                                           |
+| `ASK_RATE_LIMIT_PER_MINUTE` | `10`                                                      | Questions max par minute et par IP sur `/api/ask` et `/api/ask/stream` (`0` = illimité). Au-delà : HTTP 429 avec `Retry-After`                                                         |
+| `REDIS_ENABLED`             | `false`                                                   | Activer le cache Redis                                                                                                                                                                 |
+| `REDIS_URL`                 | `redis://localhost:6379`                                  | URL Redis                                                                                                                                                                              |
+| `UPLOADS_DIR`               | `../uploads`                                              | Répertoire des fichiers uploadés                                                                                                                                                       |
+| `MODEL_PATH`                | `../models/multilingual-e5-small`                         | Chemin du modèle ONNX                                                                                                                                                                  |
+| `MODEL_QUANTIZED`           | `true`                                                    | Télécharger le modèle int8 (118 Mo) au lieu du fp32 (470 Mo)                                                                                                                           |
+| `ONNX_THREADS`              | `2`                                                       | Threads ONNX Runtime par inférence                                                                                                                                                     |
 
 **Priorité LLM** : le LLM principal (`LLM_*`), avec bascule sur le secours (`LLM_FALLBACK_*`) en cas d'échec (quota atteint, panne, délai dépassé). Quand un secours existe, le principal n'est tenté qu'une fois.
 
@@ -225,7 +226,7 @@ volumes:
 
 - Middleware : Logger, Recoverer, RequestID, RealIP, CORS
 - **Timeouts par route** :
-  - POST `/api/ask` : 60s
+  - POST `/api/ask`, `/api/ask/stream` : 60s
   - POST `/api/import` : **pas de timeout** (SSE stream)
   - GET `/api/games` : 30s
   - Admin routes : 10s
@@ -265,12 +266,13 @@ volumes:
 
 ### Publique
 
-| Méthode | Route                      | Description                   |
-| ------- | -------------------------- | ----------------------------- |
-| `POST`  | `/api/ask`                 | Poser une question sur un jeu |
-| `GET`   | `/api/games`               | Lister les jeux               |
-| `GET`   | `/api/games/{id}`          | Détail d'un jeu               |
-| `GET`   | `/files/{slug}/{filename}` | Servir un fichier uploadé     |
+| Méthode | Route                      | Description                      |
+| ------- | -------------------------- | -------------------------------- |
+| `POST`  | `/api/ask`                 | Poser une question sur un jeu    |
+| `POST`  | `/api/ask/stream`          | Idem, réponse en streaming (SSE) |
+| `GET`   | `/api/games`               | Lister les jeux                  |
+| `GET`   | `/api/games/{id}`          | Détail d'un jeu                  |
+| `GET`   | `/files/{slug}/{filename}` | Servir un fichier uploadé        |
 
 **Body `/api/ask`** :
 
@@ -282,24 +284,26 @@ volumes:
 }
 ```
 
+`/api/ask/stream` prend le même body et envoie des Server-Sent Events : `delta` (`{"text": "…"}`, fragment de réponse), puis `done` (même JSON que `/api/ask`) ou `error` (`{"error": "…"}`). Une erreur survenue avant le premier fragment (jeu manquant ou inconnu, limite atteinte…) est renvoyée en JSON avec son code HTTP.
+
 `history` (optionnel) : échanges précédents de la conversation, du plus ancien au plus récent. Le serveur n'en garde que les 3 derniers (questions tronquées à 500 caractères, réponses à 2000), les rejoue au LLM et ajoute la question précédente à la recherche pour comprendre les questions de suivi. Une question avec historique ne passe pas par le cache. Côté interface, les conversations sont conservées dans le `localStorage` du navigateur (30 au plus).
 
 ### Admin (cookie `admin_session` requis)
 
-| Méthode  | Route                                | Description                   |
-| -------- | ------------------------------------ | ----------------------------- |
-| `POST`   | `/api/admin/login`                   | Connexion                     |
-| `POST`   | `/api/admin/logout`                  | Déconnexion                   |
-| `GET`    | `/api/admin/check`                   | Vérifier la session           |
-| `GET`    | `/api/admin/games`                   | Lister les jeux               |
-| `POST`   | `/api/admin/games`                   | Créer / mettre à jour un jeu  |
-| `DELETE` | `/api/admin/games/{id}`              | Supprimer un jeu              |
-| `GET`    | `/api/admin/files`                   | Lister les fichiers uploadés  |
-| `DELETE` | `/api/admin/files/{slug}/{filename}` | Supprimer un fichier          |
-| `GET`    | `/api/admin/logs`                    | Logs récents (`?limit=N`)     |
-| `POST`   | `/api/import`                        | Importer un fichier (SSE)     |
-| `POST`   | `/api/admin/reprocess`               | Retraiter un jeu (SSE)        |
-| `POST`   | `/api/admin/reprocess-all`           | Retraiter tous les jeux (SSE) |
+| Méthode  | Route                                | Description                                                       |
+| -------- | ------------------------------------ | ----------------------------------------------------------------- |
+| `POST`   | `/api/admin/login`                   | Connexion                                                         |
+| `POST`   | `/api/admin/logout`                  | Déconnexion                                                       |
+| `GET`    | `/api/admin/check`                   | Vérifier la session                                               |
+| `GET`    | `/api/admin/games`                   | Lister les jeux                                                   |
+| `POST`   | `/api/admin/games`                   | Créer / mettre à jour un jeu                                      |
+| `DELETE` | `/api/admin/games/{id}`              | Supprimer un jeu                                                  |
+| `GET`    | `/api/admin/files`                   | Lister les fichiers uploadés                                      |
+| `DELETE` | `/api/admin/files/{slug}/{filename}` | Supprimer un fichier                                              |
+| `GET`    | `/api/admin/logs`                    | Logs récents (`?limit=N`)                                         |
+| `POST`   | `/api/import`                        | Importer un fichier (SSE) — page `/import`, après connexion admin |
+| `POST`   | `/api/admin/reprocess`               | Retraiter un jeu (SSE)                                            |
+| `POST`   | `/api/admin/reprocess-all`           | Retraiter tous les jeux (SSE)                                     |
 
 ---
 

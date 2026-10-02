@@ -4,6 +4,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -43,24 +44,91 @@ func (h *AskHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	h.respondJSON(w, http.StatusOK, response)
 }
 
+// HandleStream traite les requêtes POST /api/ask/stream : la réponse est
+// envoyée en Server-Sent Events au fil de sa génération.
+//
+//	event: delta  data: {"text": "…"}       fragment de réponse
+//	event: done   data: {AskResponse}       réponse complète (sections, modèle…)
+//	event: error  data: {"error": "…"}      échec après le début du flux
+//
+// Une erreur survenue avant le premier fragment (jeu introuvable, aucune
+// section, LLM indisponible…) est renvoyée en JSON avec son code HTTP, comme
+// pour /api/ask.
+func (h *AskHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
+	var req usecase.AskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[ERROR] /api/ask/stream - Invalid request body: %v", err)
+		h.respondError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	stream := &sseStream{w: w}
+	response, err := h.askUseCase.ExecuteStream(r.Context(), &req, func(text string) {
+		stream.send("delta", map[string]string{"text": text})
+	})
+	if err != nil {
+		if !stream.started {
+			h.handleError(w, err)
+			return
+		}
+		_, message := errorStatus(err)
+		log.Printf("[ERROR] /api/ask/stream - Stream interrupted: %v", err)
+		stream.send("error", map[string]string{"error": message})
+		return
+	}
+	stream.send("done", response)
+}
+
+// sseStream écrit des événements SSE ; les en-têtes partent au premier envoi.
+type sseStream struct {
+	w       http.ResponseWriter
+	started bool
+}
+
+func (s *sseStream) send(event string, data interface{}) {
+	if !s.started {
+		s.started = true
+		h := s.w.Header()
+		h.Set("Content-Type", "text/event-stream")
+		h.Set("Cache-Control", "no-cache")
+		h.Set("X-Accel-Buffering", "no") // pas de mise en tampon par nginx
+		s.w.WriteHeader(http.StatusOK)
+	}
+	payload, _ := json.Marshal(data)
+	fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", event, payload)
+	_ = http.NewResponseController(s.w).Flush()
+}
+
 // handleError convertit les erreurs métier en codes HTTP appropriés.
 func (h *AskHandler) handleError(w http.ResponseWriter, err error) {
+	status, message := errorStatus(err)
+	if status == http.StatusServiceUnavailable {
+		w.Header().Set("Retry-After", "10")
+	}
+	h.respondError(w, status, message)
+}
+
+// errorStatus associe une erreur métier à un code HTTP et un message affichable.
+func errorStatus(err error) (int, string) {
 	// errors.Is : le use case enveloppe les erreurs (fmt.Errorf("...: %w"))
 	switch {
+	case errors.Is(err, entity.ErrInvalidGameName):
+		return http.StatusBadRequest, "Choisissez un jeu avant de poser votre question."
+	case errors.Is(err, entity.ErrEmptyQuestion):
+		return http.StatusBadRequest, "La question est vide."
 	case errors.Is(err, entity.ErrGameNotFound):
 		log.Printf("[ERROR] /api/ask - Game not found: %v", err)
-		h.respondError(w, http.StatusNotFound, entity.ErrGameNotFound.Error())
+		return http.StatusNotFound, entity.ErrGameNotFound.Error()
 	case errors.Is(err, entity.ErrNoSectionsFound):
 		log.Printf("[ERROR] /api/ask - No sections found: %v", err)
-		h.respondError(w, http.StatusNotFound, err.Error())
+		return http.StatusNotFound, err.Error()
 	case errors.Is(err, entity.ErrLLMRateLimited):
 		log.Printf("[WARN] /api/ask - LLM rate limited: %v", err)
-		w.Header().Set("Retry-After", "10")
-		h.respondError(w, http.StatusServiceUnavailable,
-			"Le service de réponse est très sollicité. Réessayez dans quelques secondes.")
+		return http.StatusServiceUnavailable,
+			"Le service de réponse est très sollicité. Réessayez dans quelques secondes."
 	default:
 		log.Printf("[ERROR] /api/ask - Internal error: %v", err)
-		h.respondError(w, http.StatusInternalServerError, "Internal server error")
+		return http.StatusInternalServerError, "Internal server error"
 	}
 }
 

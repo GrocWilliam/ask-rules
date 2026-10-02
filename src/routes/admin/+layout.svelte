@@ -49,6 +49,7 @@
         >
           📋 Logs
         </a>
+        <a href={resolve('/import')} class="nav-link"> 📥 Importer des règles </a>
       </div>
 
       <button class="btn-logout" disabled={isLoggingOut} on:click={handleLogout}>

@@ -23,6 +23,8 @@ type Config struct {
 	LogsHandler      *handler.LogsHandler
 	FilesHandler     *handler.FilesHandler
 	AdminAuthUseCase *usecase.AdminAuthUseCase
+	// AskRateLimitPerMinute : questions max par minute et par IP (0 = illimité)
+	AskRateLimitPerMinute int
 	// LLMWarmup réveille le LLM en arrière-plan (appelé au chargement de la page)
 	LLMWarmup func()
 }
@@ -58,8 +60,10 @@ func NewRouter(cfg *Config) *chi.Mux {
 	// ── Routes publiques ─────────────────────────────────────────────────────
 
 	r.Route("/api", func(r chi.Router) {
-		// Questions & Réponses (avec timeout)
-		r.With(middleware.Timeout(60*time.Second)).Post("/ask", cfg.AskHandler.Handle)
+		// Questions & Réponses (avec timeout), limitées par IP pour protéger le quota LLM
+		askLimit := customMiddleware.RateLimit(cfg.AskRateLimitPerMinute)
+		r.With(askLimit, middleware.Timeout(60*time.Second)).Post("/ask", cfg.AskHandler.Handle)
+		r.With(askLimit, middleware.Timeout(60*time.Second)).Post("/ask/stream", cfg.AskHandler.HandleStream)
 		r.Post("/llm/warmup", func(w http.ResponseWriter, r *http.Request) {
 			if cfg.LLMWarmup != nil {
 				cfg.LLMWarmup()
@@ -67,8 +71,9 @@ func NewRouter(cfg *Config) *chi.Mux {
 			w.WriteHeader(http.StatusAccepted)
 		})
 
-		// Import de jeux (SSE - Server-Sent Events, SANS timeout pour les opérations longues)
-		r.Post("/import", cfg.ImportHandler.Import)
+		// Import de jeux réservé à l'admin (SSE - Server-Sent Events, SANS timeout
+		// pour les opérations longues)
+		r.With(customMiddleware.AdminAuth(cfg.AdminAuthUseCase)).Post("/import", cfg.ImportHandler.Import)
 
 		// Consultation des jeux (avec timeout)
 		r.With(middleware.Timeout(30*time.Second)).Get("/games", cfg.GamesHandler.List)

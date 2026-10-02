@@ -14,7 +14,7 @@ export const load: LayoutLoad = async ({ fetch, url }) => {
       throw redirect(302, '/admin/login');
     }
     if (isAuthenticated && url.pathname === '/admin/login') {
-      throw redirect(302, '/admin/games');
+      throw redirect(302, url.searchParams.get('next') === '/import' ? '/import' : '/admin/games');
     }
     return { isAuthenticated };
   } catch (err) {
