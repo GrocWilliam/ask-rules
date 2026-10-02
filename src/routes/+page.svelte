@@ -34,7 +34,7 @@
   let selectedGame = '';
   let selectedGameLabel = '';
   let formEl: HTMLFormElement;
-  let threadEndEl: HTMLElement;
+  let scrollEl: HTMLElement;
   let questionText = '';
   let gameSearch = '';
   let showGameDropdown = false;
@@ -113,6 +113,7 @@
     selectedGameLabel = conversation.game;
     gameSearch = conversation.game;
     historyOpen = false;
+    scrollToEnd();
   }
 
   function removeConversation(id: string) {
@@ -138,7 +139,7 @@
 
   async function scrollToEnd() {
     await tick();
-    threadEndEl?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    scrollEl?.scrollTo({ top: scrollEl.scrollHeight, behavior: 'smooth' });
   }
 
   function handleGameInputFocus() {
@@ -237,171 +238,173 @@
   keywords="jeux de société, règles de jeu, IA, assistant intelligent, board games, questions réponses, recherche règles, aide jeu de société"
 />
 
-<div class="page">
-  <!-- En-tête -->
-  <header class="header">
-    <h1 class="logo">Reglomatic</h1>
-    <p class="tagline">Posez une question sur vos règles de jeu de société</p>
-  </header>
+<div class="page chat">
+  <!-- Zone défilante : en-tête, historique, conversation -->
+  <div class="chat-scroll" bind:this={scrollEl}>
+    <!-- En-tête -->
+    <header class="header">
+      <h1 class="logo">Reglomatic</h1>
+      <p class="tagline">Posez une question sur vos règles de jeu de société</p>
+    </header>
 
-  <!-- Historique des conversations -->
-  {#if $conversations.length > 0}
-    <details class="history-details" bind:open={historyOpen}>
-      <summary class="history-summary">
-        Historique · {$conversations.length} conversation{$conversations.length > 1 ? 's' : ''}
-      </summary>
-      <ul class="history-list">
-        {#each $conversations as c (c.id)}
-          <li class="history-item" class:active={c.id === currentId}>
+    <!-- Historique des conversations -->
+    {#if $conversations.length > 0}
+      <details class="history-details" bind:open={historyOpen}>
+        <summary class="history-summary">
+          Historique · {$conversations.length} conversation{$conversations.length > 1 ? 's' : ''}
+        </summary>
+        <ul class="history-list">
+          {#each $conversations as c (c.id)}
+            <li class="history-item" class:active={c.id === currentId}>
+              <button
+                type="button"
+                class="history-open"
+                on:click={() => openConversation(c.id)}
+                disabled={isLoading}
+              >
+                <span class="history-question">{c.exchanges[0]?.question}</span>
+                <span class="history-meta">
+                  🎲 {c.game} · {c.exchanges.length} question{c.exchanges.length > 1 ? 's' : ''} ·
+                  {dateFormat.format(c.updatedAt)}
+                </span>
+              </button>
+              <button
+                type="button"
+                class="history-delete"
+                title="Supprimer cette conversation"
+                aria-label="Supprimer cette conversation"
+                on:click={() => removeConversation(c.id)}
+                disabled={isLoading}>×</button
+              >
+            </li>
+          {/each}
+        </ul>
+        <button type="button" class="history-clear" on:click={clearHistory} disabled={isLoading}>
+          Effacer l’historique
+        </button>
+      </details>
+    {/if}
+
+    <!-- Conversation en cours -->
+    {#if current || pendingQuestion}
+      <section class="result-section" aria-live="polite">
+        <div class="conversation-header">
+          <div class="game-badge">
+            <span class="game-icon">🎲</span>
+            <span>{current?.game ?? pendingGame}</span>
+          </div>
+          {#if current}
             <button
               type="button"
-              class="history-open"
-              on:click={() => openConversation(c.id)}
+              class="new-conversation-btn"
+              on:click={newConversation}
               disabled={isLoading}
             >
-              <span class="history-question">{c.exchanges[0]?.question}</span>
-              <span class="history-meta">
-                🎲 {c.game} · {c.exchanges.length} question{c.exchanges.length > 1 ? 's' : ''} ·
-                {dateFormat.format(c.updatedAt)}
-              </span>
+              + Nouvelle conversation
             </button>
-            <button
-              type="button"
-              class="history-delete"
-              title="Supprimer cette conversation"
-              aria-label="Supprimer cette conversation"
-              on:click={() => removeConversation(c.id)}
-              disabled={isLoading}>×</button
-            >
-          </li>
-        {/each}
-      </ul>
-      <button type="button" class="history-clear" on:click={clearHistory} disabled={isLoading}>
-        Effacer l’historique
-      </button>
-    </details>
-  {/if}
-
-  <!-- Conversation en cours -->
-  {#if current || pendingQuestion}
-    <section class="result-section" aria-live="polite">
-      <div class="conversation-header">
-        <div class="game-badge">
-          <span class="game-icon">🎲</span>
-          <span>{current?.game ?? pendingGame}</span>
-        </div>
-        {#if current}
-          <button
-            type="button"
-            class="new-conversation-btn"
-            on:click={newConversation}
-            disabled={isLoading}
-          >
-            + Nouvelle conversation
-          </button>
-        {/if}
-      </div>
-
-      <!-- Lien(s) de téléchargement du fichier source -->
-      {#if currentFiles}
-        <div class="file-download">
-          {#each currentFiles as filePath, index (filePath)}
-            <a href="/files/{filePath}" class="file-download-link" target="_blank" rel="noopener">
-              <span class="file-icon">📄</span>
-              <span class="file-text">
-                <span class="file-label">
-                  {currentFiles.length > 1 ? `Fichier source ${index + 1}` : 'Fichier source'}
-                </span>
-                <span class="file-name">
-                  {filePath.split('/').pop()?.replace(/^\d+_/, '') || 'Télécharger'}
-                </span>
-              </span>
-              <span class="file-arrow">↓</span>
-            </a>
-          {/each}
-        </div>
-      {/if}
-
-      {#each current?.exchanges ?? [] as exchange, index (index)}
-        <article class="exchange">
-          <p class="question-reminder">« {exchange.question} »</p>
-          {#if exchange.error}
-            <div class="error-card" role="alert">
-              <span class="error-icon">⚠</span>
-              <div>
-                <div class="error-message">{exchange.error}</div>
-              </div>
-            </div>
-          {:else}
-            <!-- Réponse LLM -->
-            <div class="answer-card">
-              {#if exchange.model}
-                <div class="answer-header">
-                  Réponse
-                  <span class="model-tag">{exchange.model}</span>
-                </div>
-                <div class="answer-text">
-                  <Markdown content={exchange.answer ?? ''} />
-                </div>
-              {:else}
-                <p class="no-llm-notice">
-                  Aucun LLM configuré. Ajoutez <code>LLM_BASE_URL</code> dans
-                  <code>.env</code>.
-                </p>
-              {/if}
-            </div>
-
-            <!-- Sections source -->
-            <details class="sources-details">
-              <summary class="sources-summary">
-                {exchange.sections?.length ?? 0} section{(exchange.sections?.length ?? 0) > 1
-                  ? 's'
-                  : ''} source
-              </summary>
-              <div class="sources-list">
-                {#each exchange.sections ?? [] as s, i (i)}
-                  <div class="source-card">
-                    <div class="source-header">
-                      <span class="source-title">{s.title}</span>
-                      <div class="source-meta">
-                        {#if s.page_num && s.file?.toLowerCase().endsWith('.pdf')}
-                          <a
-                            href={pageHref(s)}
-                            class="source-page source-page-link"
-                            target="_blank"
-                            rel="noopener"
-                            title="Ouvrir le livret de règles à cette page">{pageLabel(s)} ↗</a
-                          >
-                        {:else if s.page_num}
-                          <span class="source-page">{pageLabel(s)}</span>
-                        {/if}
-                        <span class="source-score">{(s.score * 100).toFixed(0)}%</span>
-                      </div>
-                    </div>
-                    <p class="source-text">
-                      {s.content.slice(0, 220) + '…'}
-                    </p>
-                  </div>
-                {/each}
-              </div>
-            </details>
           {/if}
-        </article>
-      {/each}
+        </div>
 
-      {#if pendingQuestion}
-        <article class="exchange">
-          <p class="question-reminder">« {pendingQuestion} »</p>
-          <div class="answer-card pending">
-            <span class="spinner" aria-hidden="true"></span>Recherche dans les règles…
+        <!-- Lien(s) de téléchargement du fichier source -->
+        {#if currentFiles}
+          <div class="file-download">
+            {#each currentFiles as filePath, index (filePath)}
+              <a href="/files/{filePath}" class="file-download-link" target="_blank" rel="noopener">
+                <span class="file-icon">📄</span>
+                <span class="file-text">
+                  <span class="file-label">
+                    {currentFiles.length > 1 ? `Fichier source ${index + 1}` : 'Fichier source'}
+                  </span>
+                  <span class="file-name">
+                    {filePath.split('/').pop()?.replace(/^\d+_/, '') || 'Télécharger'}
+                  </span>
+                </span>
+                <span class="file-arrow">↓</span>
+              </a>
+            {/each}
           </div>
-        </article>
-      {/if}
-      <div bind:this={threadEndEl}></div>
-    </section>
-  {/if}
+        {/if}
 
-  <!-- Formulaire -->
+        {#each current?.exchanges ?? [] as exchange, index (index)}
+          <article class="exchange">
+            <p class="question-reminder">« {exchange.question} »</p>
+            {#if exchange.error}
+              <div class="error-card" role="alert">
+                <span class="error-icon">⚠</span>
+                <div>
+                  <div class="error-message">{exchange.error}</div>
+                </div>
+              </div>
+            {:else}
+              <!-- Réponse LLM -->
+              <div class="answer-card">
+                {#if exchange.model}
+                  <div class="answer-header">
+                    Réponse
+                    <span class="model-tag">{exchange.model}</span>
+                  </div>
+                  <div class="answer-text">
+                    <Markdown content={exchange.answer ?? ''} />
+                  </div>
+                {:else}
+                  <p class="no-llm-notice">
+                    Aucun LLM configuré. Ajoutez <code>LLM_BASE_URL</code> dans
+                    <code>.env</code>.
+                  </p>
+                {/if}
+              </div>
+
+              <!-- Sections source -->
+              <details class="sources-details">
+                <summary class="sources-summary">
+                  {exchange.sections?.length ?? 0} section{(exchange.sections?.length ?? 0) > 1
+                    ? 's'
+                    : ''} source
+                </summary>
+                <div class="sources-list">
+                  {#each exchange.sections ?? [] as s, i (i)}
+                    <div class="source-card">
+                      <div class="source-header">
+                        <span class="source-title">{s.title}</span>
+                        <div class="source-meta">
+                          {#if s.page_num && s.file?.toLowerCase().endsWith('.pdf')}
+                            <a
+                              href={pageHref(s)}
+                              class="source-page source-page-link"
+                              target="_blank"
+                              rel="noopener"
+                              title="Ouvrir le livret de règles à cette page">{pageLabel(s)} ↗</a
+                            >
+                          {:else if s.page_num}
+                            <span class="source-page">{pageLabel(s)}</span>
+                          {/if}
+                          <span class="source-score">{(s.score * 100).toFixed(0)}%</span>
+                        </div>
+                      </div>
+                      <p class="source-text">
+                        {s.content.slice(0, 220) + '…'}
+                      </p>
+                    </div>
+                  {/each}
+                </div>
+              </details>
+            {/if}
+          </article>
+        {/each}
+
+        {#if pendingQuestion}
+          <article class="exchange">
+            <p class="question-reminder">« {pendingQuestion} »</p>
+            <div class="answer-card pending">
+              <span class="spinner" aria-hidden="true"></span>Recherche dans les règles…
+            </div>
+          </article>
+        {/if}
+      </section>
+    {/if}
+  </div>
+
+  <!-- Formulaire (fixé en bas) -->
   <form bind:this={formEl} class="ask-form" on:submit|preventDefault={handleSubmit}>
     {#if !current}
       <div class="suggested-tags">
@@ -426,7 +429,7 @@
           ? 'Question de suivi : Et à deux joueurs ? Et en fin de partie ?'
           : 'Ex : Comment se déroule un combat ? Combien de joueurs ?'}
         required
-        rows="3"
+        rows={current ? 2 : 3}
         maxlength={MAX_QUESTION_LENGTH}
         disabled={isLoading}
         bind:value={questionText}
@@ -529,6 +532,73 @@
 </div>
 
 <style>
+  /* ── Mise en page chat : saisie fixée en bas, conversation défilante ── */
+
+  :global(body:has(.page.chat)) {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .page.chat {
+    flex: 1;
+    min-height: 0;
+    padding: 0 1.5rem 0.75rem;
+    gap: 0.75rem;
+  }
+
+  .chat-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    padding: 1.5rem 0.5rem 1rem 0;
+    margin-right: -0.5rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .chat-scroll::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .chat-scroll::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+
+  .chat-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--text-faint);
+  }
+
+  .page.chat .ask-form {
+    flex: none;
+    padding: 1rem;
+  }
+
+  /* Saisie en bas d'écran : la liste des jeux s'ouvre vers le haut */
+  .page.chat .game-dropdown {
+    top: auto;
+    bottom: calc(100% + 4px);
+  }
+
+  .page.chat .footer {
+    flex: none;
+    padding-top: 0;
+  }
+
+  @media (max-width: 520px) {
+    .page.chat {
+      padding: 0 1rem 0.5rem;
+    }
+
+    .page.chat .header {
+      padding: 0.5rem 0 0;
+    }
+  }
+
   /* ── Conversation ─────────────────────────────────────── */
 
   .conversation-header {
