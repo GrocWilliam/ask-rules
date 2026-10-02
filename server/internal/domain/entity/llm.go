@@ -15,3 +15,10 @@ type TokenUsage struct {
 	Completion int `json:"completion"`
 	Total      int `json:"total"`
 }
+
+// ChatTurn est un échange précédent de la conversation (question + réponse),
+// renvoyé au LLM pour qu'il comprenne les questions de suivi.
+type ChatTurn struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}

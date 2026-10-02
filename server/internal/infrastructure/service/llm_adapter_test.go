@@ -53,3 +53,29 @@ func TestPostJSONWithRetry_ExhaustedMonthlyQuotaNotRetried(t *testing.T) {
 		t.Errorf("quota mensuel épuisé : 1 seul appel attendu, obtenu %d", got)
 	}
 }
+
+func TestBuildMessages_ReplaysHistory(t *testing.T) {
+	msgs := buildMessages("Et ensuite ?", "Section 1: Tour", []entity.ChatTurn{
+		{Question: "Comment jouer ?", Answer: "On pioche une carte (p. 2)."},
+	})
+	roles := make([]string, len(msgs))
+	for i, m := range msgs {
+		roles[i] = m.Role
+	}
+	if got := strings.Join(roles, ","); got != "system,user,assistant,user" {
+		t.Fatalf("rôles inattendus : %s", got)
+	}
+	if msgs[1].Content != "Comment jouer ?" || msgs[2].Content != "On pioche une carte (p. 2)." {
+		t.Fatalf("historique mal rejoué : %+v", msgs[1:3])
+	}
+	last := msgs[3].Content
+	if !strings.Contains(last, "Section 1: Tour") || !strings.HasSuffix(last, "Question : Et ensuite ?") {
+		t.Fatalf("dernière question sans contexte : %q", last)
+	}
+}
+
+func TestBuildMessages_NoHistory(t *testing.T) {
+	if msgs := buildMessages("Q", "ctx", nil); len(msgs) != 2 {
+		t.Fatalf("attendu system + user, reçu %d messages", len(msgs))
+	}
+}

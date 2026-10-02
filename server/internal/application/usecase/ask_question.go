@@ -41,10 +41,21 @@ func NewAskQuestionUseCase(
 	}
 }
 
+// Limites appliquées à l'historique envoyé par le client : il est rejoué au
+// LLM à chaque question, il doit donc rester court (tokens, latence).
+const (
+	maxHistoryTurns     = 3
+	maxHistoryQuestion  = 500
+	maxHistoryAnswerLen = 2000
+)
+
 // AskRequest est la requête pour poser une question.
 type AskRequest struct {
 	GameName string `json:"game"`
 	Question string `json:"question"`
+	// History contient les échanges précédents de la conversation, du plus
+	// ancien au plus récent (optionnel).
+	History []entity.ChatTurn `json:"history,omitempty"`
 }
 
 // AskResponse est la réponse à une question.
@@ -88,16 +99,22 @@ func (uc *AskQuestionUseCase) Execute(ctx context.Context, req *AskRequest) (*As
 		return nil, fmt.Errorf("failed to find game: %w", err)
 	}
 
-	// 3. Vérifier le cache
+	history := trimHistory(req.History)
+
+	// 3. Vérifier le cache — uniquement pour une première question : avec un
+	// historique, la réponse dépend de la conversation
+	useCache := len(history) == 0
 	cacheKey := uc.buildCacheKey(game.ID, req.Question)
-	if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != nil {
-		// Convertir map[string]interface{} en *AskResponse via JSON
-		if cachedMap, ok := cached.(map[string]interface{}); ok {
-			b, _ := json.Marshal(cachedMap)
-			var response AskResponse
-			if json.Unmarshal(b, &response) == nil {
-				response.Cached = true
-				return &response, nil
+	if useCache {
+		if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != nil {
+			// Convertir map[string]interface{} en *AskResponse via JSON
+			if cachedMap, ok := cached.(map[string]interface{}); ok {
+				b, _ := json.Marshal(cachedMap)
+				var response AskResponse
+				if json.Unmarshal(b, &response) == nil {
+					response.Cached = true
+					return &response, nil
+				}
 			}
 		}
 	}
@@ -105,7 +122,7 @@ func (uc *AskQuestionUseCase) Execute(ctx context.Context, req *AskRequest) (*As
 	// 4. Rechercher les sections pertinentes
 	sections, err := uc.retriever.Search(ctx, &service.SearchRequest{
 		GameID:   game.ID,
-		Question: req.Question,
+		Question: searchQuery(req.Question, history),
 		Limit:    6,
 	})
 
@@ -123,7 +140,7 @@ func (uc *AskQuestionUseCase) Execute(ctx context.Context, req *AskRequest) (*As
 	contextText := uc.buildContext(sections)
 
 	// 6. Générer la réponse avec le LLM
-	llmResponse, err := uc.llm.Query(ctx, req.Question, contextText)
+	llmResponse, err := uc.llm.Query(ctx, req.Question, contextText, history)
 	if err != nil {
 		log.Printf("[ERROR] AskQuestion - Failed to generate LLM answer for game '%s': %v", game.Name, err)
 		return nil, fmt.Errorf("failed to generate answer: %w", err)
@@ -140,7 +157,9 @@ func (uc *AskQuestionUseCase) Execute(ctx context.Context, req *AskRequest) (*As
 	}
 
 	// 8. Mettre en cache
-	_ = uc.cache.Set(ctx, cacheKey, response)
+	if useCache {
+		_ = uc.cache.Set(ctx, cacheKey, response)
+	}
 
 	// 9. Logger la question en base de données
 	if uc.logRepo != nil {
@@ -148,6 +167,9 @@ func (uc *AskQuestionUseCase) Execute(ctx context.Context, req *AskRequest) (*As
 			"game":     game.Name,
 			"question": req.Question,
 			"model":    llmResponse.Model,
+		}
+		if len(history) > 0 {
+			metadata["history_turns"] = len(history)
 		}
 		if llmResponse.TokensUsed != nil {
 			metadata["tokens_input"] = llmResponse.TokensUsed.Input
@@ -165,6 +187,44 @@ func (uc *AskQuestionUseCase) Execute(ctx context.Context, req *AskRequest) (*As
 	}
 
 	return response, nil
+}
+
+// trimHistory ne garde que les derniers échanges complets, tronqués, pour
+// borner la taille du prompt quelle que soit la requête du client.
+func trimHistory(history []entity.ChatTurn) []entity.ChatTurn {
+	result := make([]entity.ChatTurn, 0, maxHistoryTurns)
+	for _, turn := range history {
+		q, a := strings.TrimSpace(turn.Question), strings.TrimSpace(turn.Answer)
+		if q == "" || a == "" {
+			continue
+		}
+		result = append(result, entity.ChatTurn{
+			Question: truncateRunes(q, maxHistoryQuestion),
+			Answer:   truncateRunes(a, maxHistoryAnswerLen),
+		})
+	}
+	if len(result) > maxHistoryTurns {
+		result = result[len(result)-maxHistoryTurns:]
+	}
+	return result
+}
+
+// truncateRunes coupe s à max caractères (sans casser un caractère UTF-8).
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
+// searchQuery enrichit une question de suivi (« et en fin de partie ? ») avec
+// la question précédente, pour que la recherche retrouve le bon sujet.
+func searchQuery(question string, history []entity.ChatTurn) string {
+	if len(history) == 0 {
+		return question
+	}
+	return history[len(history)-1].Question + " " + question
 }
 
 // buildCacheKey génère une clé de cache unique pour la question.

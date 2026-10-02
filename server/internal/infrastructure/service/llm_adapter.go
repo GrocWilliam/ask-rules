@@ -23,6 +23,7 @@ Règles importantes :
 - Réponds toujours en français
 - Cite des règles précises quand tu les énonces, avec la page indiquée dans le contexte (ex : « p. 4 »)
 - Si l'information n'est pas dans le contexte, dis-le clairement plutôt qu'inventer
+- La question peut faire suite aux échanges précédents : interprète-la à leur lumière
 - Structure ta réponse de façon claire avec des listes si nécessaire
 - Sois précis et concis`
 
@@ -88,12 +89,12 @@ func NewLLM() service.LLMService {
 }
 
 // Query génère une réponse à partir de la question et du contexte fourni.
-func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string) (*service.LLMResponse, error) {
+func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string, history []entity.ChatTurn) (*service.LLMResponse, error) {
 	if len(m.providers) == 0 {
 		return &service.LLMResponse{Answer: contextText, UsedLLM: false}, nil
 	}
 
-	resp, err := m.queryWithFallback(ctx, question, contextText)
+	resp, err := m.queryWithFallback(ctx, question, contextText, history)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +130,7 @@ func (m *ChatLLMAdapter) Warmup() {
 // queryWithFallback interroge les fournisseurs dans l'ordre jusqu'au premier succès.
 // Quand un secours existe, le fournisseur principal n'est tenté qu'une fois :
 // mieux vaut basculer tout de suite que faire patienter l'utilisateur.
-func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxText string) (entity.LLMResponse, error) {
+func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxText string, history []entity.ChatTurn) (entity.LLMResponse, error) {
 	var errs []string
 	for i, p := range m.providers {
 		isLast := i == len(m.providers)-1
@@ -149,7 +150,7 @@ func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxTex
 				continue
 			}
 		}
-		resp, err := m.queryChat(ctx, p, retries, question, ctxText)
+		resp, err := m.queryChat(ctx, p, retries, question, ctxText, history)
 		if p.health != nil {
 			if err == nil {
 				p.health.markOK()
@@ -220,6 +221,22 @@ type chatResponse struct {
 	Model string `json:"model"`
 }
 
+// buildMessages construit la conversation envoyée au LLM : les échanges
+// précédents sont rejoués tels quels, et seule la dernière question porte le
+// contexte des règles (les réponses précédentes citent déjà leurs pages).
+func buildMessages(question, ctxText string, history []entity.ChatTurn) []chatMessage {
+	messages := make([]chatMessage, 0, 2+2*len(history))
+	messages = append(messages, chatMessage{Role: "system", Content: systemPrompt})
+	for _, turn := range history {
+		messages = append(messages,
+			chatMessage{Role: "user", Content: turn.Question},
+			chatMessage{Role: "assistant", Content: turn.Answer},
+		)
+	}
+	prompt := fmt.Sprintf("Contexte du jeu :\n%s\n\nQuestion : %s", ctxText, question)
+	return append(messages, chatMessage{Role: "user", Content: prompt})
+}
+
 // chatContentText extrait le texte de la réponse : `content` est soit une
 // chaîne, soit un tableau de chunks dont seuls les chunks "text" sont gardés
 // (les chunks de raisonnement "thinking" ne sont pas montrés à l'utilisateur).
@@ -247,20 +264,15 @@ func chatContentText(raw json.RawMessage) (string, error) {
 	return b.String(), nil
 }
 
-func (m *ChatLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRetries int, question, ctxText string) (entity.LLMResponse, error) {
+func (m *ChatLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRetries int, question, ctxText string, history []entity.ChatTurn) (entity.LLMResponse, error) {
 	if p.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, p.timeout)
 		defer cancel()
 	}
-	prompt := fmt.Sprintf("Contexte du jeu :\n%s\n\nQuestion : %s", ctxText, question)
-
 	body, _ := json.Marshal(chatRequest{
-		Model: p.model,
-		Messages: []chatMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: prompt},
-		},
+		Model:       p.model,
+		Messages:    buildMessages(question, ctxText, history),
 		MaxTokens:   llmMaxTokens,
 		Temperature: 0.3,
 	})

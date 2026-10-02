@@ -46,7 +46,7 @@ func TestFallback_MistralRateLimitedUsesPlugsky(t *testing.T) {
 	mistral, mistralCalls := fakeChat(t, http.StatusTooManyRequests, "mistral")
 	plugsky, plugskyCalls := fakeChat(t, http.StatusOK, "plugsky")
 
-	resp, err := adapterFor(mistral, plugsky).Query(context.Background(), "question", "contexte")
+	resp, err := adapterFor(mistral, plugsky).Query(context.Background(), "question", "contexte", nil)
 	if err != nil {
 		t.Fatalf("erreur inattendue : %v", err)
 	}
@@ -65,7 +65,7 @@ func TestFallback_MistralOKDoesNotCallPlugsky(t *testing.T) {
 	mistral, _ := fakeChat(t, http.StatusOK, "mistral")
 	plugsky, plugskyCalls := fakeChat(t, http.StatusOK, "plugsky")
 
-	resp, err := adapterFor(mistral, plugsky).Query(context.Background(), "question", "contexte")
+	resp, err := adapterFor(mistral, plugsky).Query(context.Background(), "question", "contexte", nil)
 	if err != nil || resp.Model != "mistral" {
 		t.Fatalf("réponse attendue de mistral, obtenu %+v (err %v)", resp, err)
 	}
@@ -78,7 +78,7 @@ func TestFallback_BothFailReturnsFallbackError(t *testing.T) {
 	mistral, _ := fakeChat(t, http.StatusTooManyRequests, "mistral")
 	plugsky, _ := fakeChat(t, http.StatusUnauthorized, "plugsky")
 
-	_, err := adapterFor(mistral, plugsky).Query(context.Background(), "question", "contexte")
+	_, err := adapterFor(mistral, plugsky).Query(context.Background(), "question", "contexte", nil)
 	if err == nil {
 		t.Fatal("erreur attendue")
 	}
@@ -94,7 +94,7 @@ func TestFallback_CanceledContextSkipsFallback(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if _, err := adapterFor(mistral, plugsky).Query(ctx, "question", "contexte"); err == nil {
+	if _, err := adapterFor(mistral, plugsky).Query(ctx, "question", "contexte", nil); err == nil {
 		t.Fatal("erreur attendue avec un contexte annulé")
 	}
 	if got := atomic.LoadInt32(plugskyCalls); got != 0 {
@@ -128,7 +128,7 @@ func TestQueryChat_NoAPIKeyOmitsAuthorization(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	m := &ChatLLMAdapter{client: http.DefaultClient, providers: []chatProvider{{name: "llama", url: srv.URL}}}
-	resp, err := m.Query(context.Background(), "question", "contexte")
+	resp, err := m.Query(context.Background(), "question", "contexte", nil)
 	if err != nil || resp.Answer != "ok" {
 		t.Fatalf("réponse attendue, obtenu %+v (err %v)", resp, err)
 	}
@@ -146,7 +146,7 @@ func TestFallback_PrimaryTimeoutUsesFallback(t *testing.T) {
 
 	m := adapterFor(slow, plugsky)
 	m.providers[0].timeout = 50 * time.Millisecond
-	resp, err := m.Query(context.Background(), "question", "contexte")
+	resp, err := m.Query(context.Background(), "question", "contexte", nil)
 	if err != nil || resp.Model != "plugsky" {
 		t.Fatalf("bascule attendue sur le secours, obtenu %+v (err %v)", resp, err)
 	}

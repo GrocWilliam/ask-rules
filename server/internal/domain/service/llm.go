@@ -3,13 +3,17 @@ package service
 
 import (
 	"context"
+
+	"ask-rules-server/internal/domain/entity"
 )
 
 // LLMService génère des réponses à partir d'un contexte et d'une question.
 // Implémentation : toute API compatible OpenAI (llama.cpp, Mistral, Ollama…).
 type LLMService interface {
 	// Query génère une réponse à partir de la question et du contexte fourni.
-	Query(ctx context.Context, question, context string) (*LLMResponse, error)
+	// history contient les échanges précédents de la conversation (du plus ancien
+	// au plus récent), vide pour une première question.
+	Query(ctx context.Context, question, context string, history []entity.ChatTurn) (*LLMResponse, error)
 
 	// Warmup réveille en arrière-plan un LLM mis en veille (sans bloquer).
 	Warmup()
