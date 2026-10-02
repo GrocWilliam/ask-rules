@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"ask-rules-server/internal/domain/entity"
+	"ask-rules-server/internal/infrastructure/config"
 )
 
 // fakeChat simule une API chat/completions qui répond toujours `status`.
@@ -31,8 +33,8 @@ func fakeChat(t *testing.T, status int, model string) (*httptest.Server, *int32)
 	return srv, &calls
 }
 
-func adapterFor(primary, fallback *httptest.Server) *MistralLLMAdapter {
-	m := &MistralLLMAdapter{client: http.DefaultClient}
+func adapterFor(primary, fallback *httptest.Server) *ChatLLMAdapter {
+	m := &ChatLLMAdapter{client: http.DefaultClient}
 	m.providers = append(m.providers, chatProvider{name: "mistral", url: primary.URL, apiKey: "key-mistral", model: "mistral"})
 	if fallback != nil {
 		m.providers = append(m.providers, chatProvider{name: "plugsky", url: fallback.URL, apiKey: "key-plugsky", model: "plugsky"})
@@ -97,5 +99,55 @@ func TestFallback_CanceledContextSkipsFallback(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(plugskyCalls); got != 0 {
 		t.Errorf("client parti : pas de bascule attendue, %d appels plugsky", got)
+	}
+}
+
+func TestNewChatProvider(t *testing.T) {
+	if _, ok := newChatProvider(config.LLMProvider{}, http.DefaultClient); ok {
+		t.Error("sans BASE_URL, le fournisseur doit être désactivé")
+	}
+	p, ok := newChatProvider(config.LLMProvider{BaseURL: "http://llama.railway.internal:8080/v1/"}, http.DefaultClient)
+	if !ok {
+		t.Fatal("fournisseur attendu")
+	}
+	if p.url != "http://llama.railway.internal:8080/v1/chat/completions" {
+		t.Errorf("url inattendue : %s", p.url)
+	}
+	if p.name != "llama.railway.internal:8080" {
+		t.Errorf("nom inattendu : %s", p.name)
+	}
+}
+
+func TestQueryChat_NoAPIKeyOmitsAuthorization(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h := r.Header.Get("Authorization"); h != "" {
+			t.Errorf("pas d'en-tête Authorization attendu, obtenu %q", h)
+		}
+		_, _ = w.Write([]byte(`{"model":"local.gguf","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	m := &ChatLLMAdapter{client: http.DefaultClient, providers: []chatProvider{{name: "llama", url: srv.URL}}}
+	resp, err := m.Query(context.Background(), "question", "contexte")
+	if err != nil || resp.Answer != "ok" {
+		t.Fatalf("réponse attendue, obtenu %+v (err %v)", resp, err)
+	}
+}
+
+func TestFallback_PrimaryTimeoutUsesFallback(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(2 * time.Second):
+		}
+	}))
+	t.Cleanup(slow.Close)
+	plugsky, _ := fakeChat(t, http.StatusOK, "plugsky")
+
+	m := adapterFor(slow, plugsky)
+	m.providers[0].timeout = 50 * time.Millisecond
+	resp, err := m.Query(context.Background(), "question", "contexte")
+	if err != nil || resp.Model != "plugsky" {
+		t.Fatalf("bascule attendue sur le secours, obtenu %+v (err %v)", resp, err)
 	}
 }

@@ -30,6 +30,12 @@ function describeError(error: unknown): string {
   return 'serveur injoignable';
 }
 
+// Le LLM peut lui aussi être en veille : on le réveille dès que le backend
+// répond, pour qu'il soit prêt quand l'utilisateur posera sa question.
+function warmupLLM() {
+  fetch('/api/llm/warmup', { method: 'POST' }).catch(() => {});
+}
+
 export async function loadGames(): Promise<Game[]> {
   const progress: GamesLoadProgress = {
     attempt: 0,
@@ -51,6 +57,7 @@ export async function loadGames(): Promise<Game[]> {
           `[backend] /api/games OK (tentative ${attempt}, ${Date.now() - progress.startedAt} ms)`
         );
         gamesProgress.set(null);
+        warmupLLM();
         return games;
       }
       progress.lastError = `HTTP ${response.status}`;

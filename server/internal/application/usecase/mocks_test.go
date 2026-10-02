@@ -125,6 +125,8 @@ func (m *mockLLM) Query(ctx context.Context, question, context string) (*service
 	}, nil
 }
 
+func (m *mockLLM) Warmup() {}
+
 func (m *mockLLM) ModelName() string {
 	return "mock-model"
 }

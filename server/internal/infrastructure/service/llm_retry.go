@@ -1,6 +1,6 @@
 // infrastructure/service/llm_retry.go — Retry et cadencement des appels LLM
 //
-// Les API LLM hébergées (Mistral, Plugsky) limitent le nombre de requêtes et de
+// Les API LLM hébergées limitent le nombre de requêtes et de
 // tokens par minute. On cadence les appels (pacer) pour éviter les rafales, et
 // on réessaie les erreurs transitoires (429, 5xx) avec un backoff exponentiel.
 package service

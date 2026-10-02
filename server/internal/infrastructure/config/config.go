@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -16,17 +17,10 @@ type Config struct {
 	// Base de données
 	DatabaseURL string
 
-	// LLM
-	MistralAPIKey string
-	MistralModel  string
-	// Plugsky : fournisseur de secours si Mistral échoue
-	PlugskyAPIKey  string
-	PlugskyModel   string
-	PlugskyBaseURL string
-	OllamaHost     string
-	OllamaModel    string
-	// LLMRequestsPerSecond : cadence max des appels Mistral (0 = illimitée)
-	LLMRequestsPerSecond float64
+	// LLM : API compatible OpenAI (chat/completions) — llama.cpp, Mistral,
+	// Ollama, OpenAI… Le secours n'est utilisé que si le principal échoue.
+	LLM         LLMProvider
+	LLMFallback LLMProvider
 
 	// Admin
 	AdminPassword string
@@ -46,6 +40,26 @@ type Config struct {
 	Env string
 }
 
+// LLMProvider : un fournisseur actif dès que BaseURL est défini.
+type LLMProvider struct {
+	// BaseURL : racine de l'API, ex. https://api.mistral.ai/v1 (sans /chat/completions)
+	BaseURL string
+	// APIKey : optionnelle (llama.cpp sans --api-key, Ollama)
+	APIKey string
+	// Model : optionnel pour llama.cpp, qui sert le modèle qu'il a chargé
+	Model string
+	// RequestsPerSecond : cadence max des appels (0 = illimitée)
+	RequestsPerSecond float64
+	// Timeout : délai max d'une requête (tentatives comprises)
+	Timeout time.Duration
+	// HealthURL : endpoint de santé d'un serveur pouvant être mis en veille
+	// (llama.cpp : <hôte>/health). S'il ne répond pas, le serveur est réveillé
+	// en arrière-plan et la question part sur le secours.
+	HealthURL string
+	// WakeTimeout : durée max du réveil en arrière-plan
+	WakeTimeout time.Duration
+}
+
 var C Config
 
 func Load() error {
@@ -54,23 +68,17 @@ func Load() error {
 	_ = godotenv.Load(".env")
 
 	C = Config{
-		Port:                 getEnv("PORT", "3001"),
-		DatabaseURL:          getEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/ask-rules"),
-		MistralAPIKey:        getEnv("MISTRAL_API_KEY", ""),
-		MistralModel:         getEnv("MISTRAL_MODEL", "mistral-small-latest"),
-		PlugskyAPIKey:        getEnv("PLUGSKY_API_KEY", ""),
-		PlugskyModel:         getEnv("PLUGSKY_MODEL", "plugsky-lite"),
-		PlugskyBaseURL:       getEnv("PLUGSKY_BASE_URL", "https://plugsky.com/v1"),
-		OllamaHost:           getEnv("OLLAMA_HOST", "http://localhost:11434"),
-		OllamaModel:          getEnv("OLLAMA_MODEL", ""),
-		LLMRequestsPerSecond: getEnvFloat("LLM_REQUESTS_PER_SECOND", 1),
-		AdminPassword:        getEnv("ADMIN_PASSWORD", "admin"),
-		RedisEnabled:         getEnvBool("REDIS_ENABLED", false),
-		RedisURL:             getEnv("REDIS_URL", "redis://localhost:6379"),
-		UploadsDir:           getEnv("UPLOADS_DIR", "../uploads"),
-		ModelPath:            getEnv("MODEL_PATH", "../models/multilingual-e5-small"),
-		OnnxThreads:          getEnvInt("ONNX_THREADS", 2),
-		Env:                  getEnv("ENV", "production"),
+		Port:          getEnv("PORT", "3001"),
+		DatabaseURL:   getEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/ask-rules"),
+		LLM:           loadLLMProvider("LLM_"),
+		LLMFallback:   loadLLMProvider("LLM_FALLBACK_"),
+		AdminPassword: getEnv("ADMIN_PASSWORD", "admin"),
+		RedisEnabled:  getEnvBool("REDIS_ENABLED", false),
+		RedisURL:      getEnv("REDIS_URL", "redis://localhost:6379"),
+		UploadsDir:    getEnv("UPLOADS_DIR", "../uploads"),
+		ModelPath:     getEnv("MODEL_PATH", "../models/multilingual-e5-small"),
+		OnnxThreads:   getEnvInt("ONNX_THREADS", 2),
+		Env:           getEnv("ENV", "production"),
 	}
 
 	// Résoudre les chemins relatifs en chemins absolus
@@ -83,6 +91,18 @@ func Load() error {
 	}
 
 	return nil
+}
+
+func loadLLMProvider(prefix string) LLMProvider {
+	return LLMProvider{
+		BaseURL:           getEnv(prefix+"BASE_URL", ""),
+		APIKey:            getEnv(prefix+"API_KEY", ""),
+		Model:             getEnv(prefix+"MODEL", ""),
+		RequestsPerSecond: getEnvFloat(prefix+"REQUESTS_PER_SECOND", 0),
+		Timeout:           time.Duration(getEnvInt(prefix+"TIMEOUT_SECONDS", 60)) * time.Second,
+		HealthURL:         getEnv(prefix+"HEALTH_URL", ""),
+		WakeTimeout:       time.Duration(getEnvInt(prefix+"WAKE_TIMEOUT_SECONDS", 300)) * time.Second,
+	}
 }
 
 func getEnv(key, fallback string) string {

@@ -50,7 +50,7 @@ func main() {
 
 	// 3. Créer les services via adapters
 	embedderSvc := infraService.NewONNXEmbedder() // Instance unique — ORT ne peut être initialisé qu'une fois
-	llmSvc := infraService.NewMistralLLM()
+	llmSvc := infraService.NewLLM()
 	cacheSvc := infraService.NewRedisCache()
 	retrieverSvc := infraService.NewHybridRetriever(sectionRepo, embedderSvc)
 	pipelineSvc := infraService.NewPipeline(gameRepo, sectionRepo, embedderSvc)
@@ -93,6 +93,7 @@ func main() {
 		LogsHandler:      logsHandler,
 		FilesHandler:     filesHandler,
 		AdminAuthUseCase: adminAuthUseCase,
+		LLMWarmup:        llmSvc.Warmup,
 	})
 
 	// 8. Démarrer le serveur
@@ -101,11 +102,12 @@ func main() {
 	fmt.Printf("📂 Uploads dir  : %s\n", config.C.UploadsDir)
 	fmt.Printf("🤖 Model path   : %s\n", config.C.ModelPath)
 	fmt.Printf("📊 Repositories: Game, Section, Log\n")
-	fmt.Printf("🔧 Services: ONNX Embedder, Mistral LLM, Hybrid Retriever, Redis Cache, Pipeline\n")
+	fmt.Printf("🔧 Services: ONNX Embedder, LLM, Hybrid Retriever, Redis Cache, Pipeline\n")
 	fmt.Printf("📝 Use Cases: Ask, Import, ListGames, GetGame, UpsertGame, DeleteGame, AdminAuth, GetLogs, ManageFiles\n")
 	fmt.Printf("🌐 Endpoints:\n")
 	fmt.Printf("  GET    /health                               - Health check\n")
 	fmt.Printf("  POST   /api/ask                              - Ask a question about a game\n")
+	fmt.Printf("  POST   /api/llm/warmup                       - Wake up the LLM in background\n")
 	fmt.Printf("  POST   /api/import                           - Import game files (SSE)\n")
 	fmt.Printf("  GET    /api/games                            - List all games\n")
 	fmt.Printf("  GET    /api/games/{id}                       - Get game details\n")

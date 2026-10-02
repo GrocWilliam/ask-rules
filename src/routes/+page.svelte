@@ -361,8 +361,7 @@
             </div>
           {:else}
             <p class="no-llm-notice">
-              Aucun LLM configuré. Ajoutez <code>MISTRAL_API_KEY</code>,
-              <code>PLUGSKY_API_KEY</code> ou <code>OLLAMA_MODEL</code> dans
+              Aucun LLM configuré. Ajoutez <code>LLM_BASE_URL</code> dans
               <code>.env</code>.
             </p>
           {/if}

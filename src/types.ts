@@ -370,6 +370,6 @@ export interface LLMResponse {
   answer: string;
   model: string;
   used_llm: boolean;
-  /** Usage en tokens (absent pour Ollama et le mode fallback) */
+  /** Usage en tokens (absent si le fournisseur ne le renvoie pas ou sans LLM) */
   tokens?: LLMTokenUsage;
 }

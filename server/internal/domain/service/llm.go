@@ -6,10 +6,13 @@ import (
 )
 
 // LLMService génère des réponses à partir d'un contexte et d'une question.
-// Implémentations possibles : Mistral, OpenAI, Ollama, Claude, etc.
+// Implémentation : toute API compatible OpenAI (llama.cpp, Mistral, Ollama…).
 type LLMService interface {
 	// Query génère une réponse à partir de la question et du contexte fourni.
 	Query(ctx context.Context, question, context string) (*LLMResponse, error)
+
+	// Warmup réveille en arrière-plan un LLM mis en veille (sans bloquer).
+	Warmup()
 
 	// ModelName retourne le nom du modèle utilisé (ex: "mistral-small-latest").
 	ModelName() string
