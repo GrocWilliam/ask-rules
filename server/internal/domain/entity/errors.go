@@ -12,6 +12,9 @@ var (
 	// ErrInvalidGameName est retourné quand le nom du jeu est invalide.
 	ErrInvalidGameName = errors.New("invalid game name")
 
+	// ErrEmptyQuestion est retourné quand la question est vide.
+	ErrEmptyQuestion = errors.New("question is required")
+
 	// ErrNoSectionsFound est retourné quand aucune section pertinente n'est trouvée.
 	ErrNoSectionsFound = errors.New("no relevant sections found")
 

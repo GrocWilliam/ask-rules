@@ -80,12 +80,20 @@ type RetrievedSection struct {
 
 // Execute exécute le use case : recherche le contexte, génère la réponse.
 func (uc *AskQuestionUseCase) Execute(ctx context.Context, req *AskRequest) (*AskResponse, error) {
+	return uc.ExecuteStream(ctx, req, nil)
+}
+
+// ExecuteStream fait comme Execute, en transmettant la réponse à onToken au fil
+// de sa génération (en une fois si elle vient du cache). onToken n'est appelé
+// qu'une fois le jeu et les sections trouvés : une erreur de validation ou de
+// recherche arrive toujours avant le premier fragment.
+func (uc *AskQuestionUseCase) ExecuteStream(ctx context.Context, req *AskRequest, onToken func(string)) (*AskResponse, error) {
 	// 1. Valider la requête
-	if req.GameName == "" {
-		return nil, fmt.Errorf("game name is required")
+	if strings.TrimSpace(req.GameName) == "" {
+		return nil, fmt.Errorf("game name is required: %w", entity.ErrInvalidGameName)
 	}
-	if req.Question == "" {
-		return nil, fmt.Errorf("question is required")
+	if strings.TrimSpace(req.Question) == "" {
+		return nil, entity.ErrEmptyQuestion
 	}
 
 	// 2. Chercher le jeu par nom
@@ -113,6 +121,9 @@ func (uc *AskQuestionUseCase) Execute(ctx context.Context, req *AskRequest) (*As
 				var response AskResponse
 				if json.Unmarshal(b, &response) == nil {
 					response.Cached = true
+					if onToken != nil {
+						onToken(response.Answer)
+					}
 					return &response, nil
 				}
 			}
@@ -140,7 +151,7 @@ func (uc *AskQuestionUseCase) Execute(ctx context.Context, req *AskRequest) (*As
 	contextText := uc.buildContext(sections)
 
 	// 6. Générer la réponse avec le LLM
-	llmResponse, err := uc.llm.Query(ctx, req.Question, contextText, history)
+	llmResponse, err := uc.llm.Query(ctx, req.Question, contextText, history, onToken)
 	if err != nil {
 		log.Printf("[ERROR] AskQuestion - Failed to generate LLM answer for game '%s': %v", game.Name, err)
 		return nil, fmt.Errorf("failed to generate answer: %w", err)

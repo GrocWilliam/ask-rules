@@ -13,7 +13,9 @@ type LLMService interface {
 	// Query génère une réponse à partir de la question et du contexte fourni.
 	// history contient les échanges précédents de la conversation (du plus ancien
 	// au plus récent), vide pour une première question.
-	Query(ctx context.Context, question, context string, history []entity.ChatTurn) (*LLMResponse, error)
+	// onToken, s'il n'est pas nil, reçoit la réponse au fil de sa génération
+	// (streaming) ; la réponse complète est retournée à la fin dans tous les cas.
+	Query(ctx context.Context, question, context string, history []entity.ChatTurn, onToken func(string)) (*LLMResponse, error)
 
 	// Warmup réveille en arrière-plan un LLM mis en veille (sans bloquer).
 	Warmup()

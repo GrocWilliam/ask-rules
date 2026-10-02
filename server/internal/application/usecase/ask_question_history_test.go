@@ -25,7 +25,7 @@ func historyFixture(searchQuery *string, llmHistory *[]entity.ChatTurn, llmCalls
 		},
 	}
 	llmSvc := &mockLLM{
-		queryFunc: func(ctx context.Context, question, context string, history []entity.ChatTurn) (*service.LLMResponse, error) {
+		queryFunc: func(ctx context.Context, question, context string, history []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error) {
 			*llmCalls++
 			*llmHistory = history
 			return &service.LLMResponse{Answer: "Réponse", Model: "mock-model", UsedLLM: true}, nil

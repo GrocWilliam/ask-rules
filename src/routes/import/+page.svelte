@@ -56,7 +56,10 @@
         body: formData,
       });
 
-      if (!response.body) throw new Error(`Erreur serveur (${response.status})`);
+      if (response.status === 401) {
+        throw new Error('Session admin expirée : reconnectez-vous puis relancez l’import.');
+      }
+      if (!response.ok || !response.body) throw new Error(`Erreur serveur (${response.status})`);
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();

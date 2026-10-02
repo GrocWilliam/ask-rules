@@ -51,7 +51,7 @@ func TestHealth_AsleepPrimaryUsesFallbackThenWakes(t *testing.T) {
 	m := adapterFor(llama, plugsky)
 	m.providers[0] = withHealth(m.providers[0], llama)
 
-	resp, err := m.Query(context.Background(), "question", "contexte", nil)
+	resp, err := m.Query(context.Background(), "question", "contexte", nil, nil)
 	if err != nil || resp.Model != "plugsky" {
 		t.Fatalf("en veille : réponse attendue du secours, obtenu %+v (err %v)", resp, err)
 	}
@@ -61,7 +61,7 @@ func TestHealth_AsleepPrimaryUsesFallbackThenWakes(t *testing.T) {
 
 	// Le réveil en arrière-plan aboutit : les questions suivantes vont au principal
 	eventually(t, m.providers[0].health.fresh)
-	resp, err = m.Query(context.Background(), "question", "contexte", nil)
+	resp, err = m.Query(context.Background(), "question", "contexte", nil, nil)
 	if err != nil || resp.Model != "llama" {
 		t.Fatalf("réveillé : réponse attendue du principal, obtenu %+v (err %v)", resp, err)
 	}
@@ -72,7 +72,7 @@ func TestHealth_AsleepWithoutFallbackWaits(t *testing.T) {
 	m := &ChatLLMAdapter{client: http.DefaultClient}
 	m.providers = []chatProvider{withHealth(chatProvider{name: "llama"}, llama)}
 
-	resp, err := m.Query(context.Background(), "question", "contexte", nil)
+	resp, err := m.Query(context.Background(), "question", "contexte", nil, nil)
 	if err != nil || resp.Model != "llama" {
 		t.Fatalf("sans secours : attente du réveil attendue, obtenu %+v (err %v)", resp, err)
 	}
@@ -85,7 +85,7 @@ func TestHealth_AsleepWithoutFallbackRespectsDeadline(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	if _, err := m.Query(ctx, "question", "contexte", nil); err == nil {
+	if _, err := m.Query(ctx, "question", "contexte", nil, nil); err == nil {
 		t.Fatal("erreur attendue : réveil plus long que la requête")
 	}
 }

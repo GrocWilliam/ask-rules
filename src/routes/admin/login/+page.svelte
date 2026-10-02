@@ -2,6 +2,10 @@
   import SEO from '$lib/SEO.svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
+  import { page } from '$app/stores';
+
+  // Retour à l'import après connexion (seule destination autorisée : pas de redirection ouverte)
+  $: returnToImport = $page.url.searchParams.get('next') === '/import';
 
   let error: string | null = null;
   let isLoggingIn = false;
@@ -19,7 +23,7 @@
         body: JSON.stringify({ password: pwd }),
       });
       if (res.ok) {
-        goto(resolve('/admin/games'));
+        goto(returnToImport ? resolve('/import') : resolve('/admin/games'));
       } else {
         const d = await res.json().catch(() => ({}));
         error = d.error ?? 'Mot de passe incorrect';

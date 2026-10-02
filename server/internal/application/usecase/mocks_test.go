@@ -111,12 +111,16 @@ func (m *mockRetriever) Search(ctx context.Context, req *service.SearchRequest) 
 
 // Mock LLMService
 type mockLLM struct {
-	queryFunc func(ctx context.Context, question, context string, history []entity.ChatTurn) (*service.LLMResponse, error)
+	queryFunc func(ctx context.Context, question, context string, history []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error)
 }
 
-func (m *mockLLM) Query(ctx context.Context, question, context string, history []entity.ChatTurn) (*service.LLMResponse, error) {
+func (m *mockLLM) Query(ctx context.Context, question, context string, history []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error) {
 	if m.queryFunc != nil {
-		return m.queryFunc(ctx, question, context, history)
+		return m.queryFunc(ctx, question, context, history, onToken)
+	}
+	if onToken != nil {
+		onToken("Mocked ")
+		onToken("answer")
 	}
 	return &service.LLMResponse{
 		Answer:  "Mocked answer",

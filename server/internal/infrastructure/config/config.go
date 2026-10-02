@@ -25,6 +25,9 @@ type Config struct {
 	// Admin
 	AdminPassword string
 
+	// AskRateLimitPerMinute : questions max par minute et par IP (0 = illimité)
+	AskRateLimitPerMinute int
+
 	// Redis
 	RedisEnabled bool
 	RedisURL     string
@@ -68,17 +71,18 @@ func Load() error {
 	_ = godotenv.Load(".env")
 
 	C = Config{
-		Port:          getEnv("PORT", "3001"),
-		DatabaseURL:   getEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/ask-rules"),
-		LLM:           loadLLMProvider("LLM_"),
-		LLMFallback:   loadLLMProvider("LLM_FALLBACK_"),
-		AdminPassword: getEnv("ADMIN_PASSWORD", "admin"),
-		RedisEnabled:  getEnvBool("REDIS_ENABLED", false),
-		RedisURL:      getEnv("REDIS_URL", "redis://localhost:6379"),
-		UploadsDir:    getEnv("UPLOADS_DIR", "../uploads"),
-		ModelPath:     getEnv("MODEL_PATH", "../models/multilingual-e5-small"),
-		OnnxThreads:   getEnvInt("ONNX_THREADS", 2),
-		Env:           getEnv("ENV", "production"),
+		Port:                  getEnv("PORT", "3001"),
+		DatabaseURL:           getEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/ask-rules"),
+		LLM:                   loadLLMProvider("LLM_"),
+		LLMFallback:           loadLLMProvider("LLM_FALLBACK_"),
+		AdminPassword:         getEnv("ADMIN_PASSWORD", "admin"),
+		AskRateLimitPerMinute: getEnvIntAllowZero("ASK_RATE_LIMIT_PER_MINUTE", 10),
+		RedisEnabled:          getEnvBool("REDIS_ENABLED", false),
+		RedisURL:              getEnv("REDIS_URL", "redis://localhost:6379"),
+		UploadsDir:            getEnv("UPLOADS_DIR", "../uploads"),
+		ModelPath:             getEnv("MODEL_PATH", "../models/multilingual-e5-small"),
+		OnnxThreads:           getEnvInt("ONNX_THREADS", 2),
+		Env:                   getEnv("ENV", "production"),
 	}
 
 	// Résoudre les chemins relatifs en chemins absolus
@@ -134,6 +138,15 @@ func getEnvInt(key string, fallback int) int {
 
 func getEnvFloat(key string, fallback float64) float64 {
 	v, err := strconv.ParseFloat(os.Getenv(key), 64)
+	if err != nil || v < 0 {
+		return fallback
+	}
+	return v
+}
+
+// getEnvIntAllowZero accepte 0 (ex : désactiver une limite), contrairement à getEnvInt.
+func getEnvIntAllowZero(key string, fallback int) int {
+	v, err := strconv.Atoi(os.Getenv(key))
 	if err != nil || v < 0 {
 		return fallback
 	}

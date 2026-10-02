@@ -2,10 +2,12 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -17,9 +19,10 @@ import (
 	"ask-rules-server/internal/infrastructure/config"
 )
 
-const systemPrompt = `Tu es un assistant expert en jeux de société. Tu dois répondre uniquement en te basant sur les informations du contexte fourni.
+const systemPrompt = `Tu es un assistant expert en jeux de société. Les joueurs te consultent en pleine partie : ils veulent la règle tout de suite. Tu dois répondre uniquement en te basant sur les informations du contexte fourni.
 
 Règles importantes :
+- Commence par la réponse directe en une phrase, en gras (par « Oui » ou « Non » quand la question s'y prête), avec la page. Ajoute ensuite seulement les précisions utiles
 - Réponds toujours en français
 - Cite des règles précises quand tu les énonces, avec la page indiquée dans le contexte (ex : « p. 4 »)
 - Si l'information n'est pas dans le contexte, dis-le clairement plutôt qu'inventer
@@ -89,12 +92,15 @@ func NewLLM() service.LLMService {
 }
 
 // Query génère une réponse à partir de la question et du contexte fourni.
-func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string, history []entity.ChatTurn) (*service.LLMResponse, error) {
+func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string, history []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error) {
 	if len(m.providers) == 0 {
+		if onToken != nil {
+			onToken(contextText)
+		}
 		return &service.LLMResponse{Answer: contextText, UsedLLM: false}, nil
 	}
 
-	resp, err := m.queryWithFallback(ctx, question, contextText, history)
+	resp, err := m.queryWithFallback(ctx, question, contextText, history, onToken)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +136,17 @@ func (m *ChatLLMAdapter) Warmup() {
 // queryWithFallback interroge les fournisseurs dans l'ordre jusqu'au premier succès.
 // Quand un secours existe, le fournisseur principal n'est tenté qu'une fois :
 // mieux vaut basculer tout de suite que faire patienter l'utilisateur.
-func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxText string, history []entity.ChatTurn) (entity.LLMResponse, error) {
+// En streaming, pas de bascule une fois du texte transmis : le secours
+// recommencerait la réponse depuis le début.
+func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxText string, history []entity.ChatTurn, onToken func(string)) (entity.LLMResponse, error) {
+	streamed := false
+	if onToken != nil {
+		forward := onToken
+		onToken = func(text string) {
+			streamed = true
+			forward(text)
+		}
+	}
 	var errs []string
 	for i, p := range m.providers {
 		isLast := i == len(m.providers)-1
@@ -150,7 +166,7 @@ func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxTex
 				continue
 			}
 		}
-		resp, err := m.queryChat(ctx, p, retries, question, ctxText, history)
+		resp, err := m.queryChat(ctx, p, retries, question, ctxText, history, onToken)
 		if p.health != nil {
 			if err == nil {
 				p.health.markOK()
@@ -164,8 +180,9 @@ func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxTex
 			}
 			return resp, nil
 		}
-		// Client parti ou délai de la requête dépassé : inutile d'essayer le suivant
-		if ctx.Err() != nil || isLast {
+		// Client parti, délai de la requête dépassé ou réponse déjà entamée :
+		// inutile d'essayer le suivant
+		if ctx.Err() != nil || isLast || streamed {
 			if len(errs) > 0 {
 				return entity.LLMResponse{}, fmt.Errorf("%w (après échec : %s)", err, strings.Join(errs, " ; "))
 			}
@@ -200,6 +217,7 @@ type chatRequest struct {
 	Messages    []chatMessage `json:"messages"`
 	MaxTokens   int           `json:"max_tokens"`
 	Temperature float64       `json:"temperature"`
+	Stream      bool          `json:"stream,omitempty"`
 }
 
 type chatResponse struct {
@@ -264,7 +282,7 @@ func chatContentText(raw json.RawMessage) (string, error) {
 	return b.String(), nil
 }
 
-func (m *ChatLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRetries int, question, ctxText string, history []entity.ChatTurn) (entity.LLMResponse, error) {
+func (m *ChatLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRetries int, question, ctxText string, history []entity.ChatTurn, onToken func(string)) (entity.LLMResponse, error) {
 	if p.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, p.timeout)
@@ -275,6 +293,7 @@ func (m *ChatLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRetri
 		Messages:    buildMessages(question, ctxText, history),
 		MaxTokens:   llmMaxTokens,
 		Temperature: 0.3,
+		Stream:      onToken != nil,
 	})
 
 	headers := map[string]string{}
@@ -286,6 +305,10 @@ func (m *ChatLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRetri
 		return entity.LLMResponse{}, err
 	}
 	defer resp.Body.Close()
+
+	if onToken != nil {
+		return readChatStream(p.name, resp.Body, onToken)
+	}
 
 	var result chatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -316,4 +339,89 @@ func (m *ChatLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRetri
 			Total:      result.Usage.TotalTokens,
 		},
 	}, nil
+}
+
+// ── Streaming (Server-Sent Events) ──────────────────────
+
+// chatStreamChunk : un événement « data: » du flux chat/completions.
+type chatStreamChunk struct {
+	ID      string `json:"id"`
+	Model   string `json:"model"`
+	Choices []struct {
+		Delta struct {
+			// Chaîne ou tableau de chunks, comme Message.Content
+			Content json.RawMessage `json:"content"`
+		} `json:"delta"`
+		FinishReason *string `json:"finish_reason"`
+	} `json:"choices"`
+	// Usage : présent dans le dernier événement (Mistral, llama.cpp), sinon absent
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage"`
+}
+
+// readChatStream lit un flux SSE chat/completions, transmet chaque fragment de
+// texte à onToken et retourne la réponse complète.
+func readChatStream(provider string, body io.Reader, onToken func(string)) (entity.LLMResponse, error) {
+	var (
+		answer       strings.Builder
+		model, id    string
+		finishReason string
+		tokens       *entity.TokenUsage
+	)
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		data, ok := strings.CutPrefix(line, "data:")
+		if !ok {
+			continue // lignes vides, commentaires « : keep-alive », event:…
+		}
+		data = strings.TrimSpace(data)
+		if data == "[DONE]" {
+			break
+		}
+		var chunk chatStreamChunk
+		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			return entity.LLMResponse{}, fmt.Errorf("%s: flux invalide : %w", provider, err)
+		}
+		if chunk.Model != "" {
+			model = chunk.Model
+		}
+		if chunk.ID != "" {
+			id = chunk.ID
+		}
+		if chunk.Usage != nil {
+			tokens = &entity.TokenUsage{
+				Prompt:     chunk.Usage.PromptTokens,
+				Completion: chunk.Usage.CompletionTokens,
+				Total:      chunk.Usage.TotalTokens,
+			}
+		}
+		for _, choice := range chunk.Choices {
+			text, err := chatContentText(choice.Delta.Content)
+			if err != nil {
+				return entity.LLMResponse{}, fmt.Errorf("%s: %w", provider, err)
+			}
+			if text != "" {
+				answer.WriteString(text)
+				onToken(text)
+			}
+			if choice.FinishReason != nil && *choice.FinishReason != "" {
+				finishReason = *choice.FinishReason
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return entity.LLMResponse{}, fmt.Errorf("%s: flux interrompu : %w", provider, err)
+	}
+	if strings.TrimSpace(answer.String()) == "" {
+		return entity.LLMResponse{}, fmt.Errorf("%s: réponse vide (finish_reason=%s)", provider, finishReason)
+	}
+	if finishReason == "length" {
+		log.Printf("[WARN] %s - réponse tronquée à %d tokens (id=%s)", provider, llmMaxTokens, id)
+	}
+	return entity.LLMResponse{Answer: answer.String(), Model: model, UsedLLM: true, Tokens: tokens}, nil
 }
