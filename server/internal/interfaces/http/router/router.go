@@ -23,6 +23,8 @@ type Config struct {
 	LogsHandler      *handler.LogsHandler
 	FilesHandler     *handler.FilesHandler
 	AdminAuthUseCase *usecase.AdminAuthUseCase
+	// LLMWarmup réveille le LLM en arrière-plan (appelé au chargement de la page)
+	LLMWarmup func()
 }
 
 // NewRouter crée et configure un nouveau routeur Chi.
@@ -58,6 +60,12 @@ func NewRouter(cfg *Config) *chi.Mux {
 	r.Route("/api", func(r chi.Router) {
 		// Questions & Réponses (avec timeout)
 		r.With(middleware.Timeout(60*time.Second)).Post("/ask", cfg.AskHandler.Handle)
+		r.Post("/llm/warmup", func(w http.ResponseWriter, r *http.Request) {
+			if cfg.LLMWarmup != nil {
+				cfg.LLMWarmup()
+			}
+			w.WriteHeader(http.StatusAccepted)
+		})
 
 		// Import de jeux (SSE - Server-Sent Events, SANS timeout pour les opérations longues)
 		r.Post("/import", cfg.ImportHandler.Import)

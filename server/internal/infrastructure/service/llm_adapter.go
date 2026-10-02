@@ -1,15 +1,14 @@
-// infrastructure/service/llm_adapter.go — Client LLM intégré (Mistral, Plugsky en secours, Ollama)
+// infrastructure/service/llm_adapter.go — Client LLM compatible OpenAI (principal + secours)
 package service
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -31,27 +30,48 @@ Règles importantes :
 // pour une règle de jeu. Limite aussi la consommation du quota de tokens.
 const llmMaxTokens = 1024
 
-// chatProvider : une API au format chat/completions (Mistral, Plugsky).
+// chatProvider : une API au format chat/completions (llama.cpp, Mistral…).
 type chatProvider struct {
-	name   string
-	url    string
-	apiKey string
-	model  string
-	pacer  *pacer
+	name    string // hôte de l'API, pour les logs
+	url     string
+	apiKey  string
+	model   string
+	timeout time.Duration
+	pacer   *pacer
+	health  *healthState // nil si LLM_HEALTH_URL n'est pas défini
 }
 
-// MistralLLMAdapter implémente LLMService : Mistral en principal, Plugsky en
-// secours (quota Mistral atteint, panne…), Ollama si aucune API n'est configurée.
-type MistralLLMAdapter struct {
+func newChatProvider(c config.LLMProvider, client *http.Client) (chatProvider, bool) {
+	if c.BaseURL == "" {
+		return chatProvider{}, false
+	}
+	name := c.BaseURL
+	if u, err := url.Parse(c.BaseURL); err == nil && u.Host != "" {
+		name = u.Host
+	}
+	return chatProvider{
+		name:    name,
+		url:     strings.TrimRight(c.BaseURL, "/") + "/chat/completions",
+		apiKey:  c.APIKey,
+		model:   c.Model,
+		timeout: c.Timeout,
+		pacer:   newPacer(c.RequestsPerSecond),
+		health:  newHealthState(name, c.HealthURL, c.WakeTimeout, client),
+	}, true
+}
+
+// ChatLLMAdapter implémente LLMService avec un fournisseur principal et un
+// secours optionnel (quota atteint, panne, serveur en veille…).
+type ChatLLMAdapter struct {
 	client    *http.Client // partagé : réutilise les connexions TLS
 	providers []chatProvider
 }
 
-// NewMistralLLM crée un nouvel adapter pour le service LLM.
-func NewMistralLLM() service.LLMService {
-	m := &MistralLLMAdapter{
+// NewLLM crée l'adapter LLM à partir de la configuration LLM_* / LLM_FALLBACK_*.
+func NewLLM() service.LLMService {
+	m := &ChatLLMAdapter{
 		client: &http.Client{
-			Timeout: 60 * time.Second,
+			// Les délais sont gérés par fournisseur via le contexte
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
 					InsecureSkipVerify: config.C.Env == "development", // Permet d'ignorer les erreurs TLS en dev
@@ -59,40 +79,21 @@ func NewMistralLLM() service.LLMService {
 			},
 		},
 	}
-	if config.C.MistralAPIKey != "" {
-		m.providers = append(m.providers, chatProvider{
-			name:   "mistral",
-			url:    "https://api.mistral.ai/v1/chat/completions",
-			apiKey: config.C.MistralAPIKey,
-			model:  config.C.MistralModel,
-			pacer:  newPacer(config.C.LLMRequestsPerSecond),
-		})
-	}
-	if config.C.PlugskyAPIKey != "" {
-		m.providers = append(m.providers, chatProvider{
-			name:   "plugsky",
-			url:    strings.TrimRight(config.C.PlugskyBaseURL, "/") + "/chat/completions",
-			apiKey: config.C.PlugskyAPIKey,
-			model:  config.C.PlugskyModel,
-		})
+	for _, c := range []config.LLMProvider{config.C.LLM, config.C.LLMFallback} {
+		if p, ok := newChatProvider(c, m.client); ok {
+			m.providers = append(m.providers, p)
+		}
 	}
 	return m
 }
 
 // Query génère une réponse à partir de la question et du contexte fourni.
-func (m *MistralLLMAdapter) Query(ctx context.Context, question, contextText string) (*service.LLMResponse, error) {
-	var resp entity.LLMResponse
-	var err error
-
-	switch {
-	case len(m.providers) > 0:
-		resp, err = m.queryWithFallback(ctx, question, contextText)
-	case config.C.OllamaHost != "":
-		resp, err = m.queryOllama(ctx, question, contextText)
-	default:
-		resp = entity.LLMResponse{Answer: contextText, UsedLLM: false}
+func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string) (*service.LLMResponse, error) {
+	if len(m.providers) == 0 {
+		return &service.LLMResponse{Answer: contextText, UsedLLM: false}, nil
 	}
 
+	resp, err := m.queryWithFallback(ctx, question, contextText)
 	if err != nil {
 		return nil, err
 	}
@@ -115,10 +116,20 @@ func (m *MistralLLMAdapter) Query(ctx context.Context, question, contextText str
 	}, nil
 }
 
+// Warmup réveille en arrière-plan les fournisseurs mis en veille, pour qu'ils
+// soient prêts quand l'utilisateur posera sa question.
+func (m *ChatLLMAdapter) Warmup() {
+	for _, p := range m.providers {
+		if p.health != nil {
+			go p.health.ready(context.Background())
+		}
+	}
+}
+
 // queryWithFallback interroge les fournisseurs dans l'ordre jusqu'au premier succès.
 // Quand un secours existe, le fournisseur principal n'est tenté qu'une fois :
 // mieux vaut basculer tout de suite que faire patienter l'utilisateur.
-func (m *MistralLLMAdapter) queryWithFallback(ctx context.Context, question, ctxText string) (entity.LLMResponse, error) {
+func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxText string) (entity.LLMResponse, error) {
 	var errs []string
 	for i, p := range m.providers {
 		isLast := i == len(m.providers)-1
@@ -126,7 +137,26 @@ func (m *MistralLLMAdapter) queryWithFallback(ctx context.Context, question, ctx
 		if !isLast {
 			retries = 0
 		}
+		if p.health != nil {
+			if isLast {
+				// Pas d'autre fournisseur : attendre le réveil (dans la limite de la requête)
+				if err := p.health.waitReady(ctx); err != nil {
+					return entity.LLMResponse{}, fmt.Errorf("%s: en veille, réveil trop long : %w", p.name, err)
+				}
+			} else if !p.health.ready(ctx) {
+				log.Printf("[INFO] LLM - %s en veille, bascule sur %s", p.name, m.providers[i+1].name)
+				errs = append(errs, p.name+": en veille")
+				continue
+			}
+		}
 		resp, err := m.queryChat(ctx, p, retries, question, ctxText)
+		if p.health != nil {
+			if err == nil {
+				p.health.markOK()
+			} else {
+				p.health.markDown()
+			}
+		}
 		if err == nil {
 			if i > 0 {
 				log.Printf("[INFO] LLM - réponse fournie par %s (secours)", p.name)
@@ -147,17 +177,17 @@ func (m *MistralLLMAdapter) queryWithFallback(ctx context.Context, question, ctx
 }
 
 // ModelName retourne le nom du modèle principal utilisé.
-func (m *MistralLLMAdapter) ModelName() string {
-	if len(m.providers) > 0 {
-		return m.providers[0].model
+func (m *ChatLLMAdapter) ModelName() string {
+	if len(m.providers) == 0 {
+		return "none"
 	}
-	if config.C.OllamaHost != "" {
-		return config.C.OllamaModel
+	if m.providers[0].model == "" {
+		return m.providers[0].name
 	}
-	return "none"
+	return m.providers[0].model
 }
 
-// ── API chat/completions (Mistral, Plugsky) ────────────────────────────────
+// ── API chat/completions ────────────────────────────────
 
 type chatMessage struct {
 	Role    string `json:"role"`
@@ -165,7 +195,7 @@ type chatMessage struct {
 }
 
 type chatRequest struct {
-	Model       string        `json:"model"`
+	Model       string        `json:"model,omitempty"`
 	Messages    []chatMessage `json:"messages"`
 	MaxTokens   int           `json:"max_tokens"`
 	Temperature float64       `json:"temperature"`
@@ -217,7 +247,12 @@ func chatContentText(raw json.RawMessage) (string, error) {
 	return b.String(), nil
 }
 
-func (m *MistralLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRetries int, question, ctxText string) (entity.LLMResponse, error) {
+func (m *ChatLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRetries int, question, ctxText string) (entity.LLMResponse, error) {
+	if p.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, p.timeout)
+		defer cancel()
+	}
 	prompt := fmt.Sprintf("Contexte du jeu :\n%s\n\nQuestion : %s", ctxText, question)
 
 	body, _ := json.Marshal(chatRequest{
@@ -230,8 +265,11 @@ func (m *MistralLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRe
 		Temperature: 0.3,
 	})
 
-	resp, err := postJSONWithRetry(ctx, m.client, p.pacer, p.name, p.url,
-		map[string]string{"Authorization": "Bearer " + p.apiKey}, body, maxRetries)
+	headers := map[string]string{}
+	if p.apiKey != "" {
+		headers["Authorization"] = "Bearer " + p.apiKey
+	}
+	resp, err := postJSONWithRetry(ctx, m.client, p.pacer, p.name, p.url, headers, body, maxRetries)
 	if err != nil {
 		return entity.LLMResponse{}, err
 	}
@@ -265,58 +303,5 @@ func (m *MistralLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRe
 			Completion: result.Usage.CompletionTokens,
 			Total:      result.Usage.TotalTokens,
 		},
-	}, nil
-}
-
-// ── Ollama API ───────────────────────────────────────────────────────────────
-
-type ollamaRequest struct {
-	Model      string `json:"model"`
-	Prompt     string `json:"prompt"`
-	Stream     bool   `json:"stream"`
-	NumPredict int    `json:"num_predict,omitempty"`
-}
-
-type ollamaResponse struct {
-	Response string `json:"response"`
-	Model    string `json:"model"`
-}
-
-func (m *MistralLLMAdapter) queryOllama(ctx context.Context, question, ctxText string) (entity.LLMResponse, error) {
-	prompt := fmt.Sprintf("%s\n\nContexte du jeu :\n%s\n\nQuestion : %s", systemPrompt, ctxText, question)
-	reqBody := ollamaRequest{
-		Model:      config.C.OllamaModel,
-		Prompt:     prompt,
-		Stream:     false,
-		NumPredict: llmMaxTokens,
-	}
-	body, _ := json.Marshal(reqBody)
-	fmt.Printf("[DEBUG] Ollama request body: %s\n", string(body))
-
-	req, err := http.NewRequestWithContext(ctx, "POST",
-		config.C.OllamaHost+"/api/generate",
-		bytes.NewReader(body))
-	if err != nil {
-		return entity.LLMResponse{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: 120 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return entity.LLMResponse{}, fmt.Errorf("ollama: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
-		b, _ := io.ReadAll(resp.Body)
-		return entity.LLMResponse{}, fmt.Errorf("ollama status %d: %s", resp.StatusCode, b)
-	}
-	var result ollamaResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return entity.LLMResponse{}, err
-	}
-	return entity.LLMResponse{
-		Answer:  result.Response,
-		Model:   result.Model,
-		UsedLLM: true,
 	}, nil
 }
