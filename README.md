@@ -121,6 +121,16 @@ pnpm run dev:front      # Vite dev server pour SvelteKit
 | `pnpm run dev:back`  | Air live-reload pour Go (recompile à chaque changement) |
 | `pnpm run dev:front` | Vite dev server (HMR SvelteKit)                         |
 
+Côté serveur, [Mage](https://magefile.org) regroupe les tâches Go (`go install github.com/magefile/mage@latest`, puis depuis `server/`) :
+
+| Commande     | Description                                         |
+| ------------ | --------------------------------------------------- |
+| `mage`       | `go vet` + tests (cible par défaut)                 |
+| `mage dev`   | Live-reload avec Air                                |
+| `mage build` | Compile `ask-rules-server`                          |
+| `mage eval`  | Évaluation du retrieval (`DATABASE_URL` à définir)  |
+| `mage -l`    | Liste les cibles                                    |
+
 ---
 
 ## Variables d'environnement
@@ -355,3 +365,22 @@ Accessible sur `/admin` (mot de passe via `ADMIN_PASSWORD`) :
 - **`/admin/files`** — fichiers uploadés groupés par jeu, suppression
 - **`/admin/logs`** — journal des événements groupé par date
 - **`/import`** — import de nouveaux fichiers avec progression live (SSE)
+
+
+
+Qwen2.5 3B Instruct is usable in French, but it's at the low end. Two things follow from that.
+
+Nothing more to change in the prompt for this model:
+- No /no_think needed. Qwen2.5 has no "thinking" mode, so the switch does nothing here.
+- The new prompt suits a 3B model. Short numbered rules, one example, and a reminder just before the question are the right approach at this size.
+
+What to expect from a 3B model:
+- The French is understandable but sometimes clumsy. Expect agreement mistakes and some anglicisms. Occasionally a few words of English or Chinese may appear, more often when the extracts sent with the question are long.
+- It invents rules or pages more often than larger models. If you see that in practice, the quickest fix is to send 4 sections per question instead of 6, which shortens the context.
+
+Upgrades of a similar size, easy to swap in:
+1. Qwen3-4B-Instruct-2507: the same family, so the most direct replacement. It is clearly better than Qwen2.5 3B at following instructions and at languages other than English. Take this "Instruct-2507" version, which doesn't use thinking mode, so answers stay fast.
+2. Gemma 3 4B: often more natural in French than Qwen at this size.
+3. Ministral 3B or 8B: from Mistral, which is French. Check the license and that your inference server supports it.
+
+All three are close in size to your current model, so they should fit the same hardware. The 8B Ministral would need more. My suggestion: try Qwen3-4B-Instruct-2507 first. Then compare it with your current model on about ten questions from server/eval/questions.json, looking at the French, whether the pages are correct, and whether it invents rules.

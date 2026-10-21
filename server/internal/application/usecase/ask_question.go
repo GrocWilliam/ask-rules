@@ -131,12 +131,7 @@ func (uc *AskQuestionUseCase) ExecuteStream(ctx context.Context, req *AskRequest
 	}
 
 	// 4. Rechercher les sections pertinentes
-	sections, err := uc.retriever.Search(ctx, &service.SearchRequest{
-		GameID:   game.ID,
-		Question: searchQuery(req.Question, history),
-		Limit:    6,
-	})
-
+	sections, err := uc.search(ctx, game.ID, req.Question, history)
 	if err != nil {
 		log.Printf("[ERROR] AskQuestion - Failed to search sections for game '%s': %v", game.Name, err)
 		return nil, fmt.Errorf("failed to search sections: %w", err)
@@ -229,13 +224,47 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
-// searchQuery enrichit une question de suivi (« et en fin de partie ? ») avec
-// la question précédente, pour que la recherche retrouve le bon sujet.
-func searchQuery(question string, history []entity.ChatTurn) string {
-	if len(history) == 0 {
-		return question
+// search retrouve les sections pour la question. Pour une question de suivi,
+// deux recherches sont fusionnées : la question seule (nouveau sujet) et la
+// question complétée par la précédente (question elliptique, « et en fin de
+// partie ? »). Enrichir seule faisait dériver vers le sujet précédent.
+// Toutes les questions de l'historique sont ajoutées : la précédente peut être
+// elle-même elliptique, le sujet est alors porté par une plus ancienne.
+func (uc *AskQuestionUseCase) search(ctx context.Context, gameID, question string, history []entity.ChatTurn) ([]*entity.ScoredSection, error) {
+	const limit = 6
+	own, err := uc.retriever.Search(ctx, &service.SearchRequest{GameID: gameID, Question: question, Limit: limit})
+	if err != nil || len(history) == 0 {
+		return own, err
 	}
-	return history[len(history)-1].Question + " " + question
+	// Question en premier, puis de la plus récente à la plus ancienne
+	parts := []string{question}
+	for i := len(history) - 1; i >= 0; i-- {
+		parts = append(parts, history[i].Question)
+	}
+	enriched, err := uc.retriever.Search(ctx, &service.SearchRequest{
+		GameID:   gameID,
+		Question: strings.Join(parts, " "),
+		Limit:    limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return interleave(own, enriched, limit), nil
+}
+
+// interleave alterne les résultats de a et b, sans doublon, jusqu'à limit.
+func interleave(a, b []*entity.ScoredSection, limit int) []*entity.ScoredSection {
+	result := make([]*entity.ScoredSection, 0, limit)
+	seen := map[string]bool{}
+	for i := 0; len(result) < limit && (i < len(a) || i < len(b)); i++ {
+		for _, list := range [][]*entity.ScoredSection{a, b} {
+			if i < len(list) && !seen[list[i].ID] && len(result) < limit {
+				seen[list[i].ID] = true
+				result = append(result, list[i])
+			}
+		}
+	}
+	return result
 }
 
 // buildCacheKey génère une clé de cache unique pour la question.

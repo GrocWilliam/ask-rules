@@ -3,6 +3,7 @@ package usecase_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 )
 
 // historyFixture prépare un use case qui enregistre la recherche et l'historique reçus par le LLM.
-func historyFixture(searchQuery *string, llmHistory *[]entity.ChatTurn, llmCalls *int) *usecase.AskQuestionUseCase {
+func historyFixture(searchQueries *[]string, llmHistory *[]entity.ChatTurn, llmCalls *int) *usecase.AskQuestionUseCase {
 	gameRepo := &mockGameRepo{
 		findByNameFunc: func(ctx context.Context, name string) (*entity.Game, error) {
 			return &entity.Game{ID: "game-1", Name: "Wingspan"}, nil
@@ -20,8 +21,12 @@ func historyFixture(searchQuery *string, llmHistory *[]entity.ChatTurn, llmCalls
 	}
 	retriever := &mockRetriever{
 		searchFunc: func(ctx context.Context, req *service.SearchRequest) ([]*entity.ScoredSection, error) {
-			*searchQuery = req.Question
-			return []*entity.ScoredSection{{ID: "s1", Title: "Score", Text: "Les oiseaux rapportent des points."}}, nil
+			*searchQueries = append(*searchQueries, req.Question)
+			id := fmt.Sprintf("s%d", len(*searchQueries))
+			return []*entity.ScoredSection{
+				{ID: id, Title: "Score", Text: "Les oiseaux rapportent des points."},
+				{ID: "shared", Title: "Fin", Text: "Décompte final."},
+			}, nil
 		},
 	}
 	llmSvc := &mockLLM{
@@ -35,12 +40,12 @@ func historyFixture(searchQuery *string, llmHistory *[]entity.ChatTurn, llmCalls
 }
 
 func TestAskQuestion_HistoryPassedToLLMAndSearch(t *testing.T) {
-	var query string
+	var queries []string
 	var history []entity.ChatTurn
 	var calls int
-	uc := historyFixture(&query, &history, &calls)
+	uc := historyFixture(&queries, &history, &calls)
 
-	_, err := uc.Execute(context.Background(), &usecase.AskRequest{
+	resp, err := uc.Execute(context.Background(), &usecase.AskRequest{
 		GameName: "Wingspan",
 		Question: "Et en fin de partie ?",
 		History:  []entity.ChatTurn{{Question: "Comment marque-t-on des points ?", Answer: "Avec les oiseaux (p. 4)."}},
@@ -51,16 +56,25 @@ func TestAskQuestion_HistoryPassedToLLMAndSearch(t *testing.T) {
 	if len(history) != 1 || history[0].Question != "Comment marque-t-on des points ?" {
 		t.Fatalf("historique non transmis au LLM : %+v", history)
 	}
-	if query != "Comment marque-t-on des points ? Et en fin de partie ?" {
-		t.Fatalf("la recherche doit inclure la question précédente : %q", query)
+	// La question seule (nouveau sujet) et complétée par la précédente (suivi elliptique)
+	want := []string{"Et en fin de partie ?", "Et en fin de partie ? Comment marque-t-on des points ?"}
+	if len(queries) != 2 || queries[0] != want[0] || queries[1] != want[1] {
+		t.Fatalf("recherches inattendues : %q", queries)
+	}
+	var ids []string
+	for _, s := range resp.Sections {
+		ids = append(ids, s.Title)
+	}
+	if len(resp.Sections) != 3 {
+		t.Fatalf("résultats des deux recherches fusionnés sans doublon attendus, reçu %v", ids)
 	}
 }
 
 func TestAskQuestion_HistoryTrimmed(t *testing.T) {
-	var query string
+	var queries []string
 	var history []entity.ChatTurn
 	var calls int
-	uc := historyFixture(&query, &history, &calls)
+	uc := historyFixture(&queries, &history, &calls)
 
 	req := &usecase.AskRequest{GameName: "Wingspan", Question: "Et ensuite ?"}
 	for i := 0; i < 5; i++ {
@@ -83,13 +97,17 @@ func TestAskQuestion_HistoryTrimmed(t *testing.T) {
 	if n := len([]rune(history[2].Answer)); n > 2001 {
 		t.Fatalf("réponse non tronquée : %d caractères", n)
 	}
+	// Le sujet (Q4) reste dans la recherche même si les questions suivantes sont elliptiques
+	if len(queries) != 2 || queries[1] != "Et ensuite ? Longue Q5 Q4" {
+		t.Fatalf("la recherche enrichie doit reprendre tout l'historique gardé : %q", queries)
+	}
 }
 
 func TestAskQuestion_HistoryBypassesCache(t *testing.T) {
-	var query string
+	var queries []string
 	var history []entity.ChatTurn
 	var calls int
-	uc := historyFixture(&query, &history, &calls)
+	uc := historyFixture(&queries, &history, &calls)
 
 	first := &usecase.AskRequest{GameName: "Wingspan", Question: "Combien de points ?"}
 	if _, err := uc.Execute(context.Background(), first); err != nil {
