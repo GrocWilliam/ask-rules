@@ -94,8 +94,8 @@ func TestAskQuestion_HistoryTrimmed(t *testing.T) {
 	if history[0].Question != "Q4" || history[2].Question != "Longue" {
 		t.Fatalf("mauvais échanges conservés : %+v", history)
 	}
-	if n := len([]rune(history[2].Answer)); n > 2001 {
-		t.Fatalf("réponse non tronquée : %d caractères", n)
+	if n := len([]rune(history[2].Answer)); n != 5000 {
+		t.Fatalf("réponse rappelée en entier attendue, reçu %d caractères", n)
 	}
 	// Le sujet (Q4) reste dans la recherche même si les questions suivantes sont elliptiques
 	if len(queries) != 2 || queries[1] != "Et ensuite ? Longue Q5 Q4" {

@@ -23,8 +23,8 @@ func NewAskHandler(askUseCase *usecase.AskQuestionUseCase) *AskHandler {
 	return &AskHandler{askUseCase: askUseCase}
 }
 
-// maxAskBody : question + historique (3 échanges) tiennent largement en 64 Ko
-const maxAskBody = 64 << 10
+// maxAskBody : question + historique (3 échanges complets) tiennent largement en 256 Ko
+const maxAskBody = 256 << 10
 
 // Handle traite les requêtes POST /api/ask
 func (h *AskHandler) Handle(w http.ResponseWriter, r *http.Request) {
