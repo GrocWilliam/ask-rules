@@ -1,11 +1,9 @@
-// chatHistory.ts — Historique des conversations, conservé dans le navigateur
+// chatHistory.ts — Conversation en cours, gardée en mémoire (perdue au rechargement)
 //
-// Pas de compte utilisateur : les conversations sont stockées en localStorage.
 // Les derniers échanges de la conversation en cours sont renvoyés à /api/ask
 // pour que le LLM comprenne les questions de suivi.
 import { writable } from 'svelte/store';
 
-const STORAGE_KEY = 'ask-rules:conversations';
 const MAX_CONVERSATIONS = 30;
 const MAX_EXCHANGES = 30;
 /** Nombre d'échanges renvoyés au serveur (il en garde 3 au plus) */
@@ -44,37 +42,8 @@ export type Conversation = {
 
 export type ChatTurn = { question: string; answer: string };
 
-function load(): Conversation[] {
-  if (typeof localStorage === 'undefined') return [];
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]');
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function persist(conversations: Conversation[]) {
-  if (typeof localStorage === 'undefined') return;
-  // Quota dépassé : on abandonne les conversations les plus anciennes
-  for (let kept = conversations; kept.length > 0; kept = kept.slice(0, -1)) {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(kept));
-      return;
-    } catch {
-      // réessayer avec une conversation de moins
-    }
-  }
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // stockage indisponible (navigation privée…) : historique en mémoire seulement
-  }
-}
-
 /** Conversations triées de la plus récente à la plus ancienne */
-export const conversations = writable<Conversation[]>(load());
-conversations.subscribe(persist);
+export const conversations = writable<Conversation[]>([]);
 
 function newId(): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -119,14 +88,6 @@ export function addExchange(id: string | null, game: string, exchange: Exchange)
     );
   });
   return conversationId;
-}
-
-export function deleteConversation(id: string) {
-  conversations.update((list) => list.filter((c) => c.id !== id));
-}
-
-export function clearConversations() {
-  conversations.set([]);
 }
 
 /** Derniers échanges réussis, à envoyer comme contexte de la question suivante */

@@ -296,7 +296,7 @@ volumes:
 
 `/api/ask/stream` prend le même body et envoie des Server-Sent Events : `delta` (`{"text": "…"}`, fragment de réponse), puis `done` (même JSON que `/api/ask`) ou `error` (`{"error": "…"}`). Une erreur survenue avant le premier fragment (jeu manquant ou inconnu, limite atteinte…) est renvoyée en JSON avec son code HTTP.
 
-`history` (optionnel) : échanges précédents de la conversation, du plus ancien au plus récent. Le serveur n'en garde que les 3 derniers (questions tronquées à 500 caractères, réponses à 2000), les rejoue au LLM et ajoute la question précédente à la recherche pour comprendre les questions de suivi. Une question avec historique ne passe pas par le cache. Côté interface, les conversations sont conservées dans le `localStorage` du navigateur (30 au plus).
+`history` (optionnel) : échanges précédents de la conversation, du plus ancien au plus récent. Le serveur n'en garde que les 3 derniers (questions tronquées à 500 caractères, réponses à 2000), les rejoue au LLM et ajoute la question précédente à la recherche pour comprendre les questions de suivi. Une question avec historique ne passe pas par le cache. Côté interface, la conversation en cours est gardée en mémoire (perdue au rechargement de la page).
 
 ### Admin (cookie `admin_session` requis)
 

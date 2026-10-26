@@ -13,8 +13,6 @@
   import {
     conversations,
     addExchange,
-    deleteConversation,
-    clearConversations,
     contextTurns,
     type Exchange,
     type SectionResult,
@@ -138,36 +136,6 @@
     currentId = null;
     questionText = '';
   }
-
-  function openConversation(id: string) {
-    const conversation = $conversations.find((c) => c.id === id);
-    if (!conversation) return;
-    selectGame(conversation.game);
-    currentId = id;
-    historyOpen = false;
-    scrollToEnd();
-  }
-
-  function removeConversation(id: string) {
-    deleteConversation(id);
-    if (id === currentId) currentId = null;
-  }
-
-  function clearHistory() {
-    if (confirm('Effacer tout l’historique des conversations ?')) {
-      clearConversations();
-      currentId = null;
-    }
-  }
-
-  let historyOpen = false;
-
-  const dateFormat = new Intl.DateTimeFormat('fr-FR', {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 
   async function scrollToEnd() {
     await tick();
@@ -303,51 +271,13 @@
 />
 
 <div class="page chat">
-  <!-- Zone défilante : en-tête, historique, conversation -->
+  <!-- Zone défilante : en-tête, conversation -->
   <div class="chat-scroll" bind:this={scrollEl}>
     <!-- En-tête -->
     <header class="header">
       <h1 class="logo">Reglomatic</h1>
       <p class="tagline">Posez une question sur vos règles de jeu de société</p>
     </header>
-
-    <!-- Historique des conversations -->
-    {#if $conversations.length > 0}
-      <details class="history-details" bind:open={historyOpen}>
-        <summary class="history-summary">
-          Historique · {$conversations.length} conversation{$conversations.length > 1 ? 's' : ''}
-        </summary>
-        <ul class="history-list">
-          {#each $conversations as c (c.id)}
-            <li class="history-item" class:active={c.id === currentId}>
-              <button
-                type="button"
-                class="history-open"
-                on:click={() => openConversation(c.id)}
-                disabled={isLoading}
-              >
-                <span class="history-question">{c.exchanges[0]?.question}</span>
-                <span class="history-meta">
-                  🎲 {c.game} · {c.exchanges.length} question{c.exchanges.length > 1 ? 's' : ''} ·
-                  {dateFormat.format(c.updatedAt)}
-                </span>
-              </button>
-              <button
-                type="button"
-                class="history-delete"
-                title="Supprimer cette conversation"
-                aria-label="Supprimer cette conversation"
-                on:click={() => removeConversation(c.id)}
-                disabled={isLoading}>×</button
-              >
-            </li>
-          {/each}
-        </ul>
-        <button type="button" class="history-clear" on:click={clearHistory} disabled={isLoading}>
-          Effacer l’historique
-        </button>
-      </details>
-    {/if}
 
     <!-- Conversation en cours -->
     {#if current || pendingQuestion}
@@ -744,161 +674,6 @@
     display: flex;
     align-items: center;
     color: var(--text-muted);
-  }
-
-  /* ── Historique ───────────────────────────────────────── */
-
-  .history-details {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 0.75rem 1rem;
-  }
-
-  .history-summary {
-    cursor: pointer;
-    color: var(--text-muted);
-    font-size: 0.9rem;
-  }
-
-  .history-list {
-    list-style: none;
-    margin: 0.75rem 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    max-height: 320px;
-    overflow-y: auto;
-  }
-
-  .history-item {
-    display: flex;
-    align-items: center;
-    border-radius: var(--radius-sm);
-  }
-
-  .history-item:hover,
-  .history-item.active {
-    background: var(--surface-2);
-  }
-
-  .history-open {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    text-align: left;
-    background: none;
-    border: none;
-    padding: 0.5rem 0.6rem;
-    color: var(--text);
-    font-family: inherit;
-    cursor: pointer;
-  }
-
-  .history-question {
-    font-size: 0.92rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .history-meta {
-    font-size: 0.78rem;
-    color: var(--text-muted);
-  }
-
-  .history-delete {
-    background: none;
-    border: none;
-    color: var(--text-faint);
-    font-size: 1.2rem;
-    line-height: 1;
-    padding: 0.3rem 0.6rem;
-    cursor: pointer;
-  }
-
-  .history-delete:hover:not(:disabled) {
-    color: var(--red);
-  }
-
-  .history-clear {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    font-size: 0.8rem;
-    font-family: inherit;
-    text-decoration: underline;
-    cursor: pointer;
-  }
-
-  .history-clear:hover:not(:disabled) {
-    color: var(--red);
-  }
-
-  .suggested-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
-  }
-
-  .tag-btn {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 1rem;
-    padding: 0.4rem 0.9rem;
-    font-size: 0.875rem;
-    color: rgba(255, 255, 255, 0.75);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-family: inherit;
-    white-space: nowrap;
-  }
-
-  .tag-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.3);
-    color: rgba(255, 255, 255, 0.95);
-    transform: translateY(-1px);
-  }
-
-  .tag-btn:active:not(:disabled) {
-    transform: translateY(0);
-  }
-
-  .tag-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .question-wrapper {
-    position: relative;
-    width: 100%;
-  }
-
-  .char-counter {
-    position: absolute;
-    bottom: 0.5rem;
-    right: 0.75rem;
-    font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.4);
-    background: rgba(0, 0, 0, 0.3);
-    padding: 0.25rem 0.5rem;
-    border-radius: 0.375rem;
-    backdrop-filter: blur(4px);
-    pointer-events: none;
-    transition: color 0.3s ease;
-  }
-
-  .char-counter.warning {
-    color: rgba(255, 200, 100, 0.8);
-  }
-
-  .char-counter.danger {
-    color: rgba(255, 100, 100, 0.9);
-    font-weight: 600;
   }
 
   /* ── Searchable game selector ─────────────────────────── */
