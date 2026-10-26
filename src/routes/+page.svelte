@@ -52,8 +52,6 @@
   let gamesStatus: 'loading' | 'ready' | 'error' = 'loading';
   $: resolveGames(data.games);
 
-  let gamesError = '';
-
   async function resolveGames(promise: Promise<Game[]>) {
     gamesStatus = 'loading';
     try {
@@ -62,7 +60,7 @@
       restoreGame();
     } catch (error) {
       games = [];
-      gamesError = error instanceof Error ? error.message : '';
+      console.error('Chargement des jeux :', error);
       gamesStatus = 'error';
     }
   }
@@ -332,55 +330,49 @@
               <!-- Réponse LLM -->
               <div class="answer-card">
                 {#if exchange.model}
-                  <div class="answer-header">
-                    Réponse
-                    <span class="model-tag">{exchange.model}</span>
-                  </div>
                   <div class="answer-text">
                     <Markdown content={linkCitations(exchange.answer ?? '', exchange.sections)} />
                   </div>
                 {:else}
                   <p class="no-llm-notice">
-                    Aucun LLM configuré. Ajoutez <code>LLM_BASE_URL</code> dans
-                    <code>.env</code>.
+                    Réponse automatique indisponible : consultez les passages des règles ci-dessous.
                   </p>
                 {/if}
               </div>
 
               <!-- Sections source -->
-              <details class="sources-details">
-                <summary class="sources-summary">
-                  {exchange.sections?.length ?? 0} section{(exchange.sections?.length ?? 0) > 1
-                    ? 's'
-                    : ''} source
-                </summary>
-                <div class="sources-list">
-                  {#each exchange.sections ?? [] as s, i (i)}
-                    <div class="source-card">
-                      <div class="source-header">
-                        <span class="source-title">{s.title}</span>
-                        <div class="source-meta">
-                          {#if s.page_num && s.file?.toLowerCase().endsWith('.pdf')}
-                            <a
-                              href={pageHref(s)}
-                              class="source-page source-page-link"
-                              target="_blank"
-                              rel="noopener"
-                              title="Ouvrir le livret de règles à cette page">{pageLabel(s)} ↗</a
-                            >
-                          {:else if s.page_num}
-                            <span class="source-page">{pageLabel(s)}</span>
-                          {/if}
-                          <span class="source-score">{(s.score * 100).toFixed(0)}%</span>
+              {#if exchange.sections?.length}
+                <details class="sources-details">
+                  <summary class="sources-summary">
+                    Voir les passages des règles ({exchange.sections.length})
+                  </summary>
+                  <div class="sources-list">
+                    {#each exchange.sections ?? [] as s, i (i)}
+                      <div class="source-card">
+                        <div class="source-header">
+                          <span class="source-title">{s.title}</span>
+                          <div class="source-meta">
+                            {#if s.page_num && s.file?.toLowerCase().endsWith('.pdf')}
+                              <a
+                                href={pageHref(s)}
+                                class="source-page source-page-link"
+                                target="_blank"
+                                rel="noopener"
+                                title="Ouvrir le livret de règles à cette page">{pageLabel(s)} ↗</a
+                              >
+                            {:else if s.page_num}
+                              <span class="source-page">{pageLabel(s)}</span>
+                            {/if}
+                          </div>
                         </div>
+                        <p class="source-text">
+                          {s.content.length > 220 ? s.content.slice(0, 220) + '…' : s.content}
+                        </p>
                       </div>
-                      <p class="source-text">
-                        {s.content.slice(0, 220) + '…'}
-                      </p>
-                    </div>
-                  {/each}
-                </div>
-              </details>
+                    {/each}
+                  </div>
+                </details>
+              {/if}
             {/if}
           </article>
         {/each}
@@ -441,9 +433,11 @@
         onstart={handleVoiceStart}
         ontranscript={handleVoiceTranscript}
       />
-      <div class="char-counter" class:warning={isNearLimit} class:danger={isAtLimit}>
-        {charCount} / {MAX_QUESTION_LENGTH}
-      </div>
+      {#if isNearLimit}
+        <div class="char-counter" class:danger={isAtLimit}>
+          {charCount} / {MAX_QUESTION_LENGTH}
+        </div>
+      {/if}
     </div>
 
     <div class="form-footer">
@@ -452,17 +446,12 @@
           {#if !$gamesProgress || ($gamesProgress.attempt === 1 && !$gamesProgress.lastError)}
             ⏳ Chargement des jeux…{waitedSeconds >= 3 ? ` (${waitedSeconds} s)` : ''}
           {:else}
-            ⏳ Réveil du serveur… {waitedSeconds} s
-            <small
-              >tentative {$gamesProgress.attempt}/{$gamesProgress.maxAttempts}{$gamesProgress.lastError
-                ? ` · dernière erreur : ${$gamesProgress.lastError}`
-                : ''}</small
-            >
+            ⏳ Démarrage du serveur, merci de patienter… {waitedSeconds} s
           {/if}
         </span>
       {:else if gamesStatus === 'error'}
         <span class="game-label empty games-status" role="alert">
-          Serveur indisponible{gamesError ? ` (${gamesError})` : ''}
+          Serveur indisponible pour le moment.
           <button type="button" class="games-retry-btn" on:click={retryGames}>Réessayer</button>
         </span>
       {:else if games.length > 1}
@@ -472,6 +461,7 @@
             type="text"
             class="game-search-input"
             placeholder="Choisir le jeu…"
+            aria-label="Jeu"
             aria-invalid={gameError ? 'true' : undefined}
             autocomplete="off"
             disabled={isLoading}
@@ -480,13 +470,17 @@
             on:blur={handleGameInputBlur}
           />
           {#if selectedGame}
-            <button type="button" class="game-clear-btn" on:click={clearGame} tabindex="-1">
+            <button
+              type="button"
+              class="game-clear-btn"
+              on:click={clearGame}
+              aria-label="Changer de jeu"
+            >
               ×
             </button>
           {:else}
             <span class="game-search-icon">🔍</span>
           {/if}
-          <!-- Champ caché pour la soumission -->
           {#if showGameDropdown}
             <ul class="game-dropdown">
               {#if filteredGames.length === 0}
@@ -510,7 +504,7 @@
       {:else if games.length === 1}
         <span class="game-label">🎲 {games[0].name}</span>
       {:else}
-        <span class="game-label empty">Aucun jeu indexé</span>
+        <span class="game-label empty">Aucun jeu disponible pour le moment</span>
       {/if}
 
       <button
@@ -534,7 +528,9 @@
   <footer class="footer">
     {#if games.length > 0}
       <span
-        >{games.length} jeu{games.length > 1 ? 'x' : ''} indexé{games.length > 1 ? 's' : ''}</span
+        >{games.length} jeu{games.length > 1 ? 'x' : ''} disponible{games.length > 1
+          ? 's'
+          : ''}</span
       >
     {/if}
     <span class="version">v{__APP_VERSION__}</span>
@@ -721,17 +717,13 @@
     bottom: 0.5rem;
     right: 0.75rem;
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(255, 200, 100, 0.8);
     background: rgba(0, 0, 0, 0.3);
     padding: 0.25rem 0.5rem;
     border-radius: 0.375rem;
     backdrop-filter: blur(4px);
     pointer-events: none;
     transition: color 0.3s ease;
-  }
-
-  .char-counter.warning {
-    color: rgba(255, 200, 100, 0.8);
   }
 
   .char-counter.danger {

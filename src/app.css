@@ -17,7 +17,7 @@
   --accent-hover: #9d5bff;
   --text: #e4e4ef;
   --text-muted: #7c7c96;
-  --text-faint: #45455a;
+  --text-faint: #6a6a84;
   --green: #22c55e;
   --red: #f87171;
   --radius: 12px;
@@ -172,11 +172,6 @@ body {
   gap: 0.15rem;
 }
 
-.games-status small {
-  font-size: 0.75rem;
-  opacity: 0.8;
-}
-
 .games-retry-btn {
   align-self: flex-start;
   background: none;
@@ -263,20 +258,8 @@ body {
   line-height: 1.5;
 }
 
-.error-card.rate-limited {
-  background: rgba(251, 146, 60, 0.12);
-  border-color: rgba(251, 146, 60, 0.35);
-  color: #fb923c;
-}
-
 .error-message {
   font-weight: 500;
-}
-
-.retry-info {
-  margin-top: 0.4rem;
-  font-size: 0.85rem;
-  opacity: 0.8;
 }
 
 .error-icon {
@@ -303,16 +286,6 @@ body {
 
 .game-icon {
   font-size: 1rem;
-}
-
-.badge-tag {
-  background: rgba(124, 58, 237, 0.25);
-  border-radius: 99px;
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  padding: 0.1rem 0.5rem;
-  color: #a78bfa;
 }
 
 /* ── Lien de téléchargement ────────────────────────────────────────────────── */
@@ -402,35 +375,10 @@ body {
   box-shadow: var(--shadow);
 }
 
-.answer-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  margin-bottom: 1rem;
-}
-
-.model-tag {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 99px;
-  color: var(--text-faint);
-  font-size: 0.72rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  padding: 0.15rem 0.6rem;
-  text-transform: none;
-}
-
 .answer-text {
   color: var(--text);
   font-size: 1rem;
   line-height: 1.75;
-  white-space: pre-wrap;
 }
 
 .no-llm-notice {
@@ -550,17 +498,6 @@ details[open] .sources-summary::before {
 .source-page-link:focus-visible {
   background: rgba(124, 58, 237, 0.16);
   text-decoration: underline;
-}
-
-.source-score {
-  background: rgba(34, 197, 94, 0.1);
-  border: 1px solid rgba(34, 197, 94, 0.2);
-  border-radius: 99px;
-  color: var(--green);
-  flex-shrink: 0;
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 0.1rem 0.5rem;
 }
 
 .source-text {
