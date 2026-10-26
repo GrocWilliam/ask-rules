@@ -101,7 +101,6 @@ func NewRouter(cfg *Config) *chi.Mux {
 				r.Post("/reprocess-all", cfg.ImportHandler.ReprocessAll)
 
 				// Jobs tracking (pour reprise après déconnexion)
-				r.Get("/jobs", cfg.ImportHandler.ListJobs)                    // Liste tous les jobs
 				r.Get("/jobs/{id}", cfg.ImportHandler.GetJobStatus)           // Statut d'un job
 				r.Get("/jobs/{id}/stream", cfg.ImportHandler.StreamJobEvents) // Reconnexion SSE
 

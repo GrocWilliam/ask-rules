@@ -32,12 +32,10 @@
   "dependencies": {
     "@sveltejs/adapter-static": "3.0.8",
     "@sveltejs/kit": "2.53.0",
-    "dotenv": "17.3.1",
     "marked": "^17.0.3",
     "svelte": "5.53.3"
   },
   "devDependencies": {
-    "@types/marked": "^6.0.0",
     "@types/node": "22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
@@ -46,7 +44,6 @@
     "prettier": "^3.8.1",
     "prettier-plugin-svelte": "^3.5.0",
     "svelte-check": "4.4.3",
-    "tsx": "4.21.0",
     "typescript": "5.9.3",
     "typescript-eslint": "^8.56.1",
     "vite": "6.4.1"

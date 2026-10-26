@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -226,38 +225,6 @@ func (t *JobTracker) GetJob(jobID string) (*Job, bool) {
 	return jobCopy, true
 }
 
-// ListJobs retourne tous les jobs (pour debug/admin).
-func (t *JobTracker) ListJobs() []*Job {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	jobs := make([]*Job, 0, len(t.jobs))
-	for _, job := range t.jobs {
-		job.mu.RLock()
-		jobCopy := &Job{
-			ID:          job.ID,
-			Type:        job.Type,
-			Status:      job.Status,
-			GameName:    job.GameName,
-			GameID:      job.GameID,
-			StartedAt:   job.StartedAt,
-			CompletedAt: job.CompletedAt,
-			Error:       job.Error,
-		}
-		if job.Progress != nil {
-			jobCopy.Progress = &JobProgress{
-				Current: job.Progress.Current,
-				Total:   job.Progress.Total,
-				Message: job.Progress.Message,
-			}
-		}
-		job.mu.RUnlock()
-		jobs = append(jobs, jobCopy)
-	}
-
-	return jobs
-}
-
 // cleanupLoop nettoie périodiquement les vieux jobs terminés.
 func (t *JobTracker) cleanupLoop() {
 	ticker := time.NewTicker(1 * time.Hour)
@@ -296,9 +263,4 @@ func (t *JobTracker) CreateEventWrapper(jobID string, originalSend func(string, 
 			originalSend(eventType, data)
 		}
 	}
-}
-
-// MarshalJob convertit un job en JSON pour la réponse HTTP.
-func MarshalJob(job *Job) ([]byte, error) {
-	return json.Marshal(job)
 }

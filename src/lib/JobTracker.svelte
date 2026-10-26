@@ -31,7 +31,7 @@
   /**
    * Se connecter à un job (nouveau ou existant)
    */
-  function connectToJob(id: string, isResume: boolean = false) {
+  function connectToJob(id: string) {
     if (eventSource) {
       eventSource.close();
     }
@@ -44,7 +44,7 @@
     localStorage.setItem(STORAGE_KEY, id);
 
     // URL différente selon nouveau job ou reprise
-    const url = isResume ? `/api/admin/jobs/${id}/stream` : `/api/admin/jobs/${id}/stream`;
+    const url = `/api/admin/jobs/${id}/stream`;
 
     eventSource = new EventSource(url);
 
@@ -190,7 +190,7 @@
    * Reprendre un job existant
    */
   export function resume(id: string) {
-    connectToJob(id, true);
+    connectToJob(id);
   }
 
   // Lifecycle

@@ -11,3 +11,4 @@ models
 server/ask-rules-server
 server/main
 server/tmp
+server/libonnxruntime.so

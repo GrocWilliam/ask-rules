@@ -143,106 +143,95 @@ func getExtensionFromContentType(contentType string) string {
 	}
 }
 
-// Import traite les requêtes POST /api/import avec Server-Sent Events.
-func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
-	// Configurer SSE
+// importStream envoie les Server-Sent Events des imports (type dans data). Le
+// traitement continue si le client se déconnecte : les envois sont alors ignorés.
+type importStream struct {
+	w       http.ResponseWriter
+	flusher http.Flusher
+	mu      sync.Mutex
+	closed  bool
+	stop    context.CancelFunc
+}
+
+// startImportStream ouvre le flux et envoie un ping toutes les 10 secondes pour éviter
+// les timeouts proxy/navigateur. Lire le corps de la requête avant : une fois
+// la réponse commencée, Go ne permet plus de le lire (upload lent).
+func startImportStream(w http.ResponseWriter, r *http.Request) (*importStream, bool) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "SSE not supported", http.StatusInternalServerError)
+		return nil, false
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		log.Printf("[ERROR] /api/import - SSE not supported")
-		http.Error(w, "SSE not supported", http.StatusInternalServerError)
-		return
-	}
-
-	// Détection de déconnexion client
-	clientDisconnected := false
-	var clientMu sync.RWMutex
-
-	// Fonction d'envoi SSE (ignore les erreurs si client déconnecté)
-	var sendMu sync.Mutex
-	send := func(eventType string, data map[string]interface{}) {
-		clientMu.RLock()
-		disconnected := clientDisconnected
-		clientMu.RUnlock()
-
-		if disconnected {
-			// Client déconnecté, ne pas envoyer (traitement continue en arrière-plan)
-			return
-		}
-
-		sendMu.Lock()
-		defer sendMu.Unlock()
-		merged := map[string]interface{}{"type": eventType}
-		for k, v := range data {
-			merged[k] = v
-		}
-		b, _ := json.Marshal(merged)
-		_, err := fmt.Fprintf(w, "data: %s\n\n", b)
-		if err != nil {
-			// Erreur d'écriture = client déconnecté
-			clientMu.Lock()
-			clientDisconnected = true
-			clientMu.Unlock()
-			return
-		}
-		flusher.Flush()
-	}
-
-	sendError := func(msg string) {
-		send("error", map[string]interface{}{"error": msg})
-	}
-
-	// Surveillance de la déconnexion client (pour logs uniquement)
-	go func() {
-		<-r.Context().Done()
-		clientMu.Lock()
-		if !clientDisconnected {
-			clientDisconnected = true
-			log.Printf("[INFO] /api/import - Client déconnecté, traitement continue en arrière-plan")
-		}
-		clientMu.Unlock()
-	}()
-
-	// Parser le formulaire multipart avant le premier ping : une fois la réponse
-	// commencée, Go ne permet plus de lire le corps de la requête (upload lent)
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-	// Au-delà de maxMemoryUpload, les fichiers sont écrits dans des fichiers temporaires
-	if err := r.ParseMultipartForm(maxMemoryUpload); err != nil {
-		log.Printf("[ERROR] /api/import - File too large or parse error: %v", err)
-		sendError("File too large (max 50 MB)")
-		return
-	}
-
-	// Heartbeat pour garder la connexion SSE ouverte
-	// Envoie un ping toutes les 10 secondes pour éviter les timeouts proxy/navigateur
-	heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
-	defer heartbeatCancel()
-
-	pingCount := 0
+	ctx, stop := context.WithCancel(r.Context())
+	s := &importStream{w: w, flusher: flusher, stop: stop}
 	go func() {
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
-		for {
+		for count := 1; ; count++ {
 			select {
-			case <-heartbeatCtx.Done():
-				log.Printf("[INFO] /api/import - SSE connection closed after %d pings", pingCount)
-				return
-			case <-r.Context().Done():
-				// Client déconnecté, arrêter le heartbeat
+			case <-ctx.Done():
+				s.close() // fin du handler ou client déconnecté
 				return
 			case <-ticker.C:
-				pingCount++
-				send("ping", map[string]interface{}{"timestamp": time.Now().Unix(), "count": pingCount})
-				if pingCount%6 == 0 {
-					log.Printf("[DEBUG] /api/import - SSE heartbeat: %d pings sent (%.1f min)", pingCount, float64(pingCount)/6)
-				}
+				s.send("ping", map[string]interface{}{"timestamp": time.Now().Unix(), "count": count})
 			}
 		}
 	}()
+	return s, true
+}
+
+func (s *importStream) send(eventType string, data map[string]interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	merged := map[string]interface{}{"type": eventType}
+	for k, v := range data {
+		merged[k] = v
+	}
+	b, _ := json.Marshal(merged)
+	if _, err := fmt.Fprintf(s.w, "data: %s\n\n", b); err != nil {
+		s.closed = true // erreur d'écriture = client déconnecté
+		return
+	}
+	s.flusher.Flush()
+}
+
+func (s *importStream) sendError(msg string) {
+	s.send("error", map[string]interface{}{"error": msg})
+}
+
+// close arrête les pings ; à appeler avant la fin du handler (plus d'écriture ensuite).
+func (s *importStream) close() {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
+	s.stop()
+}
+
+// Import traite les requêtes POST /api/import avec Server-Sent Events.
+func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
+	// Au-delà de maxMemoryUpload, les fichiers sont écrits dans des fichiers temporaires
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+	parseErr := r.ParseMultipartForm(maxMemoryUpload)
+
+	stream, ok := startImportStream(w, r)
+	if !ok {
+		return
+	}
+	defer stream.close()
+
+	if parseErr != nil {
+		log.Printf("[ERROR] /api/import - File too large or parse error: %v", parseErr)
+		stream.sendError("File too large (max 50 MB)")
+		return
+	}
 
 	// Récupérer le nom du jeu
 	gameName := r.FormValue("gameName")
@@ -254,7 +243,7 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	if gameName == "" {
 		log.Printf("[ERROR] /api/import - Missing game name")
-		sendError("Game name is required")
+		stream.sendError("Game name is required")
 		return
 	}
 
@@ -268,25 +257,20 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 		urlStr := r.FormValue("url")
 		if urlStr == "" {
 			log.Printf("[ERROR] /api/import - Missing URL for game '%s'", gameName)
-			sendError("URL is required for URL import mode")
+			stream.sendError("URL is required for URL import mode")
 			return
 		}
 
 		log.Printf("[INFO] /api/import - Downloading file from URL: %s", urlStr)
-		send("downloading", map[string]interface{}{"url": urlStr})
+		stream.send("downloading", map[string]interface{}{"url": urlStr})
 
-		// Calculer le slug pour créer le bon répertoire
-		slug := usecase.Slugify(gameName)
-
-		// Télécharger et sauvegarder directement dans uploads/
-		filePath, filename, err := downloadAndSaveFromURL(urlStr, slug)
+		// Télécharger et sauvegarder directement dans le dossier du jeu
+		filePath, filename, err := downloadAndSaveFromURL(urlStr, usecase.Slugify(gameName))
 		if err != nil {
 			log.Printf("[ERROR] /api/import - Failed to download from URL '%s': %v", urlStr, err)
-			sendError(fmt.Sprintf("Failed to download file: %v", err))
+			stream.sendError(fmt.Sprintf("Failed to download file: %v", err))
 			return
 		}
-
-		// Ajouter à la liste des fichiers pré-copiés
 		preCopiedPaths = append(preCopiedPaths, filePath)
 
 		log.Printf("[INFO] /api/import - Successfully downloaded '%s' from URL", filename)
@@ -301,7 +285,7 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(files) == 0 {
 			log.Printf("[ERROR] /api/import - No files provided for game '%s'", gameName)
-			sendError("No files provided")
+			stream.sendError("No files provided")
 			return
 		}
 	}
@@ -312,136 +296,59 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 		mode = "replace"
 	}
 
-	// Créer la requête
 	req := &usecase.ImportRequest{
 		GameName:       gameName,
 		Files:          files,
 		PreCopiedPaths: preCopiedPaths,
 		Mode:           mode,
-		OnEvent:        send,
+		OnEvent:        stream.send,
 	}
 
-	// Exécuter le use case avec un contexte indépendant
-	// Le traitement continue même si le client SSE se déconnecte
-	processCtx := context.Background()
+	// Contexte indépendant : le traitement continue même si le client se déconnecte
 	log.Printf("[INFO] /api/import - Starting import for game '%s' (continues on disconnect)", gameName)
-
-	if err := h.importUseCase.Execute(processCtx, req); err != nil {
+	if err := h.importUseCase.Execute(context.Background(), req); err != nil {
 		log.Printf("[ERROR] /api/import - Failed to import game '%s': %v", gameName, err)
-		sendError(err.Error())
+		stream.sendError(err.Error())
 		return
 	}
 
 	log.Printf("[INFO] /api/import - Import completed for game '%s'", gameName)
 }
 
-// Reprocess traite les requêtes POST /api/admin/games/{id}/reprocess avec Server-Sent Events.
-func (h *ImportHandler) Reprocess(w http.ResponseWriter, r *http.Request) {
-	// Configurer SSE
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "SSE not supported", http.StatusInternalServerError)
-		return
-	}
-
-	// Détection de déconnexion client
-	clientDisconnected := false
-	var clientMu sync.RWMutex
-
-	var sendMu sync.Mutex
-	send := func(eventType string, data map[string]interface{}) {
-		clientMu.RLock()
-		disconnected := clientDisconnected
-		clientMu.RUnlock()
-
-		if disconnected {
-			return
-		}
-
-		sendMu.Lock()
-		defer sendMu.Unlock()
-		merged := map[string]interface{}{"type": eventType}
-		for k, v := range data {
-			merged[k] = v
-		}
-		b, _ := json.Marshal(merged)
-		_, err := fmt.Fprintf(w, "data: %s\n\n", b)
-		if err != nil {
-			clientMu.Lock()
-			clientDisconnected = true
-			clientMu.Unlock()
-			return
-		}
-		flusher.Flush()
-	}
-
-	go func() {
-		<-r.Context().Done()
-		clientMu.Lock()
-		if !clientDisconnected {
-			clientDisconnected = true
-			log.Printf("[INFO] /api/admin/games/reprocess - Client déconnecté, traitement continue")
-		}
-		clientMu.Unlock()
-	}()
-
-	heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
-	defer heartbeatCancel()
-
-	pingCount := 0
-	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-heartbeatCtx.Done():
-				log.Printf("[INFO] /api/admin/games/reprocess - SSE connection closed after %d pings", pingCount)
-				return
-			case <-r.Context().Done():
-				return
-			case <-ticker.C:
-				pingCount++
-				send("ping", map[string]interface{}{"timestamp": time.Now().Unix(), "count": pingCount})
-				if pingCount%6 == 0 {
-					log.Printf("[DEBUG] /api/admin/games/reprocess - SSE heartbeat: %d pings sent (%.1f min)", pingCount, float64(pingCount)/6)
-				}
-			}
-		}
-	}()
-
-	gameID := chi.URLParam(r, "id")
-	if gameID == "" {
-		send("error", map[string]interface{}{"error": "Missing game ID"})
-		return
-	}
-
-	// Créer un job tracké pour permettre la reconnexion
-	jobID := h.jobTracker.CreateJob(JobTypeReprocess, "", gameID)
-
-	// Envoyer le job ID immédiatement pour permettre la reconnexion
-	send("job_started", map[string]interface{}{
+// startJob crée un job tracké (reconnexion possible via /api/admin/jobs/{id})
+// et retourne la fonction d'envoi qui enregistre aussi les événements du job.
+func (h *ImportHandler) startJob(stream *importStream, jobType JobType, gameName, gameID string) (string, func(string, map[string]interface{})) {
+	jobID := h.jobTracker.CreateJob(jobType, gameName, gameID)
+	stream.send("job_started", map[string]interface{}{
 		"job_id":  jobID,
 		"message": "Job créé, vous pouvez vous reconnecter à /api/admin/jobs/" + jobID,
 	})
+	return jobID, h.jobTracker.CreateEventWrapper(jobID, stream.send)
+}
 
-	// Wrapper la fonction send pour enregistrer dans le tracker
-	trackedSend := h.jobTracker.CreateEventWrapper(jobID, send)
+// Reprocess traite les requêtes POST /api/admin/games/{id}/reprocess avec Server-Sent Events.
+func (h *ImportHandler) Reprocess(w http.ResponseWriter, r *http.Request) {
+	stream, ok := startImportStream(w, r)
+	if !ok {
+		return
+	}
+	defer stream.close()
 
+	gameID := chi.URLParam(r, "id")
+	if gameID == "" {
+		stream.sendError("Missing game ID")
+		return
+	}
+
+	jobID, trackedSend := h.startJob(stream, JobTypeReprocess, "", gameID)
 	req := &usecase.ReprocessRequest{
 		GameID:  gameID,
 		OnEvent: trackedSend,
 	}
 
-	// Utiliser un contexte indépendant pour continuer même après déconnexion
-	processCtx := context.Background()
+	// Contexte indépendant : le traitement continue même si le client se déconnecte
 	log.Printf("[INFO] /api/admin/games/%s/reprocess - Starting job %s (continues on disconnect)", gameID, jobID)
-
-	if err := h.reprocessUseCase.Execute(processCtx, req); err != nil {
+	if err := h.reprocessUseCase.Execute(context.Background(), req); err != nil {
 		log.Printf("[ERROR] /api/admin/games/%s/reprocess - Failed: %v", gameID, err)
 		h.jobTracker.CompleteJob(jobID, false, err.Error())
 		trackedSend("error", map[string]interface{}{"error": err.Error()})
@@ -454,110 +361,28 @@ func (h *ImportHandler) Reprocess(w http.ResponseWriter, r *http.Request) {
 
 // ReprocessAll traite les requêtes POST /api/admin/reprocess-all avec Server-Sent Events.
 func (h *ImportHandler) ReprocessAll(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "SSE not supported", http.StatusInternalServerError)
-		return
-	}
-
-	// Détection de déconnexion client
-	clientDisconnected := false
-	var clientMu sync.RWMutex
-
-	var sendMu sync.Mutex
-	send := func(eventType string, data map[string]interface{}) {
-		clientMu.RLock()
-		disconnected := clientDisconnected
-		clientMu.RUnlock()
-
-		if disconnected {
-			return
-		}
-
-		sendMu.Lock()
-		defer sendMu.Unlock()
-		merged := map[string]interface{}{"type": eventType}
-		for k, v := range data {
-			merged[k] = v
-		}
-		b, _ := json.Marshal(merged)
-		_, err := fmt.Fprintf(w, "data: %s\n\n", b)
-		if err != nil {
-			clientMu.Lock()
-			clientDisconnected = true
-			clientMu.Unlock()
-			return
-		}
-		flusher.Flush()
-	}
-
-	go func() {
-		<-r.Context().Done()
-		clientMu.Lock()
-		if !clientDisconnected {
-			clientDisconnected = true
-			log.Printf("[INFO] /api/admin/reprocess-all - Client déconnecté, traitement continue")
-		}
-		clientMu.Unlock()
-	}()
-
-	heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
-	defer heartbeatCancel()
-
-	pingCount := 0
-	go func() {
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-heartbeatCtx.Done():
-				log.Printf("[INFO] /api/admin/reprocess-all - SSE connection closed after %d pings", pingCount)
-				return
-			case <-r.Context().Done():
-				return
-			case <-ticker.C:
-				pingCount++
-				send("ping", map[string]interface{}{"timestamp": time.Now().Unix(), "count": pingCount})
-				if pingCount%6 == 0 {
-					log.Printf("[DEBUG] /api/admin/reprocess-all - SSE heartbeat: %d pings sent (%.1f min)", pingCount, float64(pingCount)/6)
-				}
-			}
-		}
-	}()
-
-	log.Printf("[INFO] /api/admin/reprocess-all - Starting reprocess of all games")
-
-	// Lire les game_ids optionnels depuis le body JSON (tableau vide ou absent = tous les jeux)
+	// game_ids optionnels (tableau vide ou absent = tous les jeux) ; erreurs de
+	// décodage ignorées (body vide ou Content-Type absent = tous les jeux)
 	var body struct {
 		GameIDs []string `json:"game_ids"`
 	}
-	// Ignorer les erreurs de décodage (body vide ou Content-Type absent = tous les jeux)
 	_ = json.NewDecoder(r.Body).Decode(&body)
 
+	stream, ok := startImportStream(w, r)
+	if !ok {
+		return
+	}
+	defer stream.close()
+
+	log.Printf("[INFO] /api/admin/reprocess-all - Starting reprocess of all games")
 	if len(body.GameIDs) > 0 {
 		log.Printf("[INFO] /api/admin/reprocess-all - Filtering to %d game(s): %v", len(body.GameIDs), body.GameIDs)
 	}
 
-	// Créer un job tracké pour permettre la reconnexion
-	jobID := h.jobTracker.CreateJob(JobTypeReprocessAll, "all", "")
+	jobID, trackedSend := h.startJob(stream, JobTypeReprocessAll, "all", "")
 
-	// Envoyer le job ID immédiatement
-	send("job_started", map[string]interface{}{
-		"job_id":  jobID,
-		"message": "Job créé, vous pouvez vous reconnecter à /api/admin/jobs/" + jobID,
-	})
-
-	// Wrapper la fonction send pour enregistrer dans le tracker
-	trackedSend := h.jobTracker.CreateEventWrapper(jobID, send)
-
-	// Utiliser un contexte indépendant pour continuer même après déconnexion
-	processCtx := context.Background()
-	h.reprocessUseCase.ExecuteAll(processCtx, body.GameIDs, trackedSend)
+	// Contexte indépendant : le traitement continue même si le client se déconnecte
+	h.reprocessUseCase.ExecuteAll(context.Background(), body.GameIDs, trackedSend)
 	h.jobTracker.CompleteJob(jobID, true, "")
 	log.Printf("[INFO] /api/admin/reprocess-all - Completed job %s", jobID)
 }
@@ -682,11 +507,4 @@ func (h *ImportHandler) StreamJobEvents(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 	}
-}
-
-// ListJobs retourne la liste de tous les jobs (pour debug admin).
-func (h *ImportHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
-	jobs := h.jobTracker.ListJobs()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jobs)
 }

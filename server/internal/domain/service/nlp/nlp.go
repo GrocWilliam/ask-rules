@@ -124,36 +124,6 @@ func DetectSectionType(title, text string) SectionType {
 	return TypeGeneral
 }
 
-// IntentType catégorise l'intention d'une question.
-type IntentType = string
-
-const (
-	IntentRules     IntentType = "rules"
-	IntentSetup     IntentType = "setup"
-	IntentScoring   IntentType = "scoring"
-	IntentStrategy  IntentType = "strategy"
-	IntentComponent IntentType = "component"
-	IntentGeneral   IntentType = "general"
-)
-
-var intentPatterns = map[IntentType]*regexp.Regexp{
-	IntentSetup:     regexp.MustCompile(`(?i)(comment (on |)commence|mise en place|début|préparer|setup|installation)`),
-	IntentScoring:   regexp.MustCompile(`(?i)(points?|score|gagner|victoire|compter|décompte)`),
-	IntentStrategy:  regexp.MustCompile(`(?i)(stratégie|conseil|meilleur|comment jouer|optimiser)`),
-	IntentComponent: regexp.MustCompile(`(?i)(combien|composant|dé|carte|tuile|jeton|matériel|contenu)`),
-}
-
-// DetectIntent retourne l'intention d'une question.
-func DetectIntent(question string) IntentType {
-	lower := strings.ToLower(question)
-	for intent, re := range intentPatterns {
-		if re.MatchString(lower) {
-			return intent
-		}
-	}
-	return IntentRules
-}
-
 // ExtractKeywords extrait les mots-clés significatifs d'un texte.
 // Les noms du domaine jeu (gameNouns) sont toujours inclus.
 // Les stopwords et mots < 3 car. sont exclus.
