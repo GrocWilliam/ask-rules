@@ -29,14 +29,18 @@ Consignes :
 3. Si la question est courte (« et pour… ? »), elle porte sur le sujet de l'échange précédent.
 4. Si les extraits ne donnent pas la réponse, réponds : « Je ne trouve pas cette règle dans le livret. »
 5. Réponds en français, en 80 mots au plus.
+6. Commence directement par la règle : jamais « Ok », « D'accord », « Bien sûr » ni reformulation de la question.
+7. « Oui » ou « Non » seulement pour une question fermée (« Peut-on… ? », « Est-ce que… ? »).
 
 Format :
-- Première ligne : la réponse directe en gras, avec la page. Commence par « Oui » ou « Non » si la question s'y prête.
+- Première ligne : la réponse directe en gras, avec la page.
 - Ensuite, seulement si utile : 1 à 3 précisions en liste, chacune avec sa page.
 
-Exemple :
-Question : Peut-on jouer deux cartes dans le même tour ?
-Réponse :
+Exemple pour « Comment gagne-t-on ? » :
+**Le premier joueur à 10 points gagne la partie (p. 4).**
+- En cas d'égalité, celui qui a le plus de cartes l'emporte (p. 4).
+
+Exemple pour « Peut-on jouer deux cartes dans le même tour ? » :
 **Non, une seule carte par tour (p. 3).**
 - Exception : la carte « Renfort » permet d'en jouer une seconde (p. 7).`
 
@@ -261,8 +265,8 @@ func buildMessages(question, ctxText string, history []entity.ChatTurn) []chatMe
 			chatMessage{Role: "assistant", Content: turn.Answer},
 		)
 	}
-	// Rappel juste avant la question : un petit modèle suit mieux la consigne la plus proche
-	prompt := fmt.Sprintf("Extraits du livret :\n---\n%s\n---\n\nRéponds avec ces extraits seulement, réponse directe en gras d'abord.\n\nQuestion : %s", ctxText, question)
+	// Pas de consigne dans ce message : un petit modèle y répond par « Ok, … »
+	prompt := fmt.Sprintf("Extraits du livret :\n---\n%s\n---\n\nQuestion : %s", ctxText, question)
 	return append(messages, chatMessage{Role: "user", Content: prompt})
 }
 
