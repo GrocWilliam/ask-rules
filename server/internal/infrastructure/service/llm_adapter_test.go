@@ -54,23 +54,23 @@ func TestPostJSONWithRetry_ExhaustedMonthlyQuotaNotRetried(t *testing.T) {
 	}
 }
 
-func TestBuildMessages_ReplaysHistory(t *testing.T) {
+func TestBuildMessages_HistoryInSingleMessage(t *testing.T) {
 	msgs := buildMessages("Et ensuite ?", "Section 1: Tour", []entity.ChatTurn{
-		{Question: "Comment jouer ?", Answer: "On pioche une carte (p. 2)."},
+		{Question: "Comment jouer ?", Answer: "**Oui** (p. 1)."},
+		{Question: "Comment piocher ?", Answer: "On pioche une carte (p. 2)."},
 	})
-	roles := make([]string, len(msgs))
-	for i, m := range msgs {
-		roles[i] = m.Role
+	// Pas de tour assistant : un petit modèle imiterait les réponses précédentes
+	if len(msgs) != 2 || msgs[1].Role != "user" {
+		t.Fatalf("attendu system + user, reçu %+v", msgs)
 	}
-	if got := strings.Join(roles, ","); got != "system,user,assistant,user" {
-		t.Fatalf("rôles inattendus : %s", got)
+	last := msgs[1].Content
+	for _, want := range []string{"Section 1: Tour", "- Comment jouer ?", "- Comment piocher ?", "On pioche une carte (p. 2)."} {
+		if !strings.Contains(last, want) {
+			t.Errorf("%q absent du message : %q", want, last)
+		}
 	}
-	if msgs[1].Content != "Comment jouer ?" || msgs[2].Content != "On pioche une carte (p. 2)." {
-		t.Fatalf("historique mal rejoué : %+v", msgs[1:3])
-	}
-	last := msgs[3].Content
-	if !strings.Contains(last, "Section 1: Tour") || !strings.HasSuffix(last, "Question : Et ensuite ?") {
-		t.Fatalf("dernière question sans contexte : %q", last)
+	if strings.Contains(last, "**Oui** (p. 1).") || !strings.HasSuffix(last, "Question : Et ensuite ?") {
+		t.Fatalf("message inattendu : %q", last)
 	}
 }
 

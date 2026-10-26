@@ -20,14 +20,14 @@ import (
 	"ask-rules-server/internal/infrastructure/config"
 )
 
-// systemPrompt vise un petit modèle (Qwen) : consignes courtes et numérotées,
+// systemPrompt vise un petit modèle (Gemma 3 1B) : consignes courtes et numérotées,
 // format montré par un exemple plutôt que décrit.
 const systemPrompt = `Tu es l'arbitre d'une partie de jeu de société. Les joueurs te posent une question de règle en pleine partie.
 
 Consignes :
 1. Réponds uniquement avec les extraits du livret fournis avec la question. N'invente jamais une règle ni une page.
 2. Utilise seulement les extraits qui concernent la question, ignore les autres.
-3. Si la question est courte (« et pour… ? »), elle porte sur le sujet de l'échange précédent.
+3. Si la question est courte (« et pour… ? »), elle porte sur le sujet des questions précédentes.
 4. Si les extraits ne donnent pas la réponse, réponds : « Je ne trouve pas cette règle dans le livret. »
 5. Réponds en français, en 80 mots au plus.
 6. Commence directement par la règle : jamais « Ok », « D'accord », « Bien sûr » ni reformulation de la question.
@@ -309,23 +309,27 @@ type chatResponse struct {
 	Model string `json:"model"`
 }
 
-// buildMessages construit la conversation envoyée au LLM : les échanges
-// précédents sont rejoués tels quels, et seule la dernière question porte le
-// contexte des règles (les réponses précédentes citent déjà leurs pages).
+// buildMessages construit un seul message utilisateur, même en conversation :
+// rejouer les échanges en tours user/assistant faisait imiter les réponses
+// précédentes à un petit modèle, jusqu'à répondre « Oui » tout court.
+// Seuls le sujet (questions précédentes) et la dernière réponse sont rappelés.
 func buildMessages(question, ctxText string, history []entity.ChatTurn) []chatMessage {
-	messages := make([]chatMessage, 0, 2+2*len(history))
-	messages = append(messages, chatMessage{Role: "system", Content: systemPrompt})
-
-	for _, turn := range history {
-		messages = append(messages,
-			chatMessage{Role: "user", Content: turn.Question},
-			chatMessage{Role: "assistant", Content: turn.Answer},
-		)
-	}
+	var b strings.Builder
 	// Pas de consigne à l'impératif ici : un petit modèle y répond par « Ok, … ».
 	// Le rappel de ne citer que les extraits reste dans le titre, au plus près de la question.
-	prompt := fmt.Sprintf("Extraits du livret (seule source autorisée) :\n---\n%s\n---\n\nQuestion : %s", ctxText, question)
-	return append(messages, chatMessage{Role: "user", Content: prompt})
+	fmt.Fprintf(&b, "Extraits du livret (seule source autorisée) :\n---\n%s\n---\n\n", ctxText)
+	if len(history) > 0 {
+		b.WriteString("Questions précédentes :\n")
+		for _, turn := range history {
+			b.WriteString("- " + turn.Question + "\n")
+		}
+		fmt.Fprintf(&b, "Dernière réponse donnée : %s\n\n", history[len(history)-1].Answer)
+	}
+	b.WriteString("Question : " + question)
+	return []chatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: b.String()},
+	}
 }
 
 // chatContentText extrait le texte de la réponse : `content` est soit une

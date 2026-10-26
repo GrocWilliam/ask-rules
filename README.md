@@ -368,19 +368,10 @@ Accessible sur `/admin` (mot de passe via `ADMIN_PASSWORD`) :
 
 
 
-Qwen2.5 3B Instruct is usable in French, but it's at the low end. Two things follow from that.
+## Choix du modèle
 
-Nothing more to change in the prompt for this model:
-- No /no_think needed. Qwen2.5 has no "thinking" mode, so the switch does nothing here.
-- The new prompt suits a 3B model. Short numbered rules, one example, and a reminder just before the question are the right approach at this size.
+Modèle actuel : **Gemma 3 1B** (avant : un Qwen d'environ 0,8B). Le prompt (`server/internal/infrastructure/service/llm_adapter.go`) est écrit pour un modèle de cette taille : consignes courtes et numérotées, exemples de format, un seul message utilisateur (rejouer les échanges précédents faisait répondre « Oui » tout court au bout de quelques questions).
 
-What to expect from a 3B model:
-- The French is understandable but sometimes clumsy. Expect agreement mistakes and some anglicisms. Occasionally a few words of English or Chinese may appear, more often when the extracts sent with the question are long.
-- It invents rules or pages more often than larger models. If you see that in practice, the quickest fix is to send 4 sections per question instead of 6, which shortens the context.
+À cette taille, attendez-vous à un français parfois maladroit (voire des réponses en anglais), à des consignes suivies imparfaitement, et à des règles ou des pages inventées. Si c'est fréquent, envoyer 4 sections au lieu de 6 raccourcit le contexte.
 
-Upgrades of a similar size, easy to swap in:
-1. Qwen3-4B-Instruct-2507: the same family, so the most direct replacement. It is clearly better than Qwen2.5 3B at following instructions and at languages other than English. Take this "Instruct-2507" version, which doesn't use thinking mode, so answers stay fast.
-2. Gemma 3 4B: often more natural in French than Qwen at this size.
-3. Ministral 3B or 8B: from Mistral, which is French. Check the license and that your inference server supports it.
-
-All three are close in size to your current model, so they should fit the same hardware. The 8B Ministral would need more. My suggestion: try Qwen3-4B-Instruct-2507 first. Then compare it with your current model on about ten questions from server/eval/questions.json, looking at the French, whether the pages are correct, and whether it invents rules.
+Meilleurs modèles si le matériel le permet : Qwen3-4B-Instruct-2507 (sans mode « thinking », donc rapide), Gemma 3 4B (français souvent plus naturel) ou Ministral 3B/8B. Pour comparer, posez une dizaine de questions de `server/eval/questions.json` et vérifiez le français, les pages citées et l'absence de règles inventées.
