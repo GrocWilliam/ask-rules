@@ -29,13 +29,13 @@ Consignes :
 2. Utilise seulement les extraits qui concernent la question, ignore les autres.
 3. Si la question est courte (« et pour… ? »), elle porte sur le sujet des questions précédentes.
 4. Si les extraits ne donnent pas la réponse, réponds : « Je ne trouve pas cette règle dans le livret. »
-5. Réponds en français, de façon complète : donne toutes les règles des extraits utiles à la question (cas particuliers, exceptions, variantes selon le nombre de joueurs).
+5. Réponds en français, en 80 mots au plus.
 6. Commence directement par la règle : jamais « Ok », « D'accord », « Bien sûr » ni reformulation de la question.
 7. « Oui » ou « Non » seulement pour une question fermée (« Peut-on… ? », « Est-ce que… ? »).
 
 Format :
 - Première ligne : la réponse directe en gras, avec la page.
-- Ensuite : les précisions en liste, chacune avec sa page.
+- Ensuite, seulement si utile : 1 à 3 précisions en liste, chacune avec sa page.
 
 Exemple pour « Comment gagne-t-on ? » :
 **Le premier joueur à 10 points gagne la partie (p. 4).**
@@ -48,6 +48,10 @@ Exemple pour « Peut-on jouer deux cartes dans le même tour ? » :
 // fillerOpening : accusé de réception en tête de réponse (« Ok, », « D'accord. »…),
 // retiré malgré la consigne du prompt qu'un petit modèle ne suit pas toujours.
 var fillerOpening = regexp.MustCompile(`(?i)^\s*(ok|okay|d'accord|d’accord|bien sûr|très bien)\b\s*[,.!:]?\s*`)
+
+// llmMaxTokens : longueur max d'une réponse (~750 mots), largement suffisante
+// pour une règle de jeu. Limite aussi la consommation du quota de tokens.
+const llmMaxTokens = 1024
 
 // chatProvider : une API au format chat/completions (llama.cpp, Mistral…).
 type chatProvider struct {
@@ -281,6 +285,7 @@ type chatMessage struct {
 type chatRequest struct {
 	Model       string        `json:"model,omitempty"`
 	Messages    []chatMessage `json:"messages"`
+	MaxTokens   int           `json:"max_tokens"`
 	Temperature float64       `json:"temperature"`
 	Stream      bool          `json:"stream,omitempty"`
 }
@@ -363,6 +368,7 @@ func (m *ChatLLMAdapter) queryChat(ctx context.Context, llmProvider chatProvider
 	body, _ := json.Marshal(chatRequest{
 		Model:       llmProvider.model,
 		Messages:    buildMessages(question, ctxText, history),
+		MaxTokens:   llmMaxTokens,
 		Temperature: 0.3,
 		Stream:      onToken != nil,
 	})
@@ -397,7 +403,7 @@ func (m *ChatLLMAdapter) queryChat(ctx context.Context, llmProvider chatProvider
 		return entity.LLMResponse{}, fmt.Errorf("%s: réponse vide (finish_reason=%s)", llmProvider.name, choice.FinishReason)
 	}
 	if choice.FinishReason == "length" {
-		log.Printf("[WARN] %s - réponse tronquée par le serveur LLM (id=%s)", llmProvider.name, result.ID)
+		log.Printf("[WARN] %s - réponse tronquée à %d tokens (id=%s)", llmProvider.name, llmMaxTokens, result.ID)
 	}
 
 	return entity.LLMResponse{
@@ -492,7 +498,7 @@ func readChatStream(provider string, body io.Reader, onToken func(string)) (enti
 		return entity.LLMResponse{}, fmt.Errorf("%s: réponse vide (finish_reason=%s)", provider, finishReason)
 	}
 	if finishReason == "length" {
-		log.Printf("[WARN] %s - réponse tronquée par le serveur LLM (id=%s)", provider, id)
+		log.Printf("[WARN] %s - réponse tronquée à %d tokens (id=%s)", provider, llmMaxTokens, id)
 	}
 	return entity.LLMResponse{Answer: answer.String(), Model: model, UsedLLM: true, Tokens: tokens}, nil
 }

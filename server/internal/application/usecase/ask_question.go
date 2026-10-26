@@ -42,12 +42,13 @@ func NewAskQuestionUseCase(
 	}
 }
 
-// Limites appliquées à la question et à l'historique envoyés par le client
-// (les réponses rappelées ne sont pas tronquées : le corps de requête est borné).
+// Limites appliquées à la question et à l'historique envoyés par le client :
+// ils partent au LLM à chaque question, ils doivent rester courts (tokens, latence).
 const (
-	maxQuestionLen     = 500 // comme MAX_QUESTION_LENGTH côté interface
-	maxHistoryTurns    = 3
-	maxHistoryQuestion = 500
+	maxQuestionLen      = 500 // comme MAX_QUESTION_LENGTH côté interface
+	maxHistoryTurns     = 3
+	maxHistoryQuestion  = 500
+	maxHistoryAnswerLen = 2000
 )
 
 // AskRequest est la requête pour poser une question.
@@ -208,7 +209,7 @@ func trimHistory(history []entity.ChatTurn) []entity.ChatTurn {
 		}
 		result = append(result, entity.ChatTurn{
 			Question: truncateRunes(q, maxHistoryQuestion),
-			Answer:   a,
+			Answer:   truncateRunes(a, maxHistoryAnswerLen),
 		})
 	}
 	if len(result) > maxHistoryTurns {
