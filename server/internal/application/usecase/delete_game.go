@@ -3,12 +3,14 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/repository"
 	"ask-rules-server/internal/domain/service"
+	"ask-rules-server/internal/infrastructure/storage"
 )
 
 // DeleteGameUseCase gère la logique métier pour supprimer un jeu.
@@ -36,7 +38,7 @@ func (uc *DeleteGameUseCase) Execute(ctx context.Context, gameID string) error {
 	// 1. Vérifier que le jeu existe
 	game, err := uc.gameRepo.FindByID(ctx, gameID)
 	if err != nil {
-		if err == entity.ErrGameNotFound {
+		if errors.Is(err, entity.ErrGameNotFound) {
 			log.Printf("[ERROR] DeleteGame - Game '%s' not found", gameID)
 			return fmt.Errorf("game '%s' not found: %w", gameID, entity.ErrGameNotFound)
 		}
@@ -55,10 +57,10 @@ func (uc *DeleteGameUseCase) Execute(ctx context.Context, gameID string) error {
 		return fmt.Errorf("failed to delete game: %w", err)
 	}
 
-	// 4. Invalider le cache (best effort, ne pas échouer si erreur)
-	// On ne peut pas invalider toutes les clés facilement, Redis SCAN serait nécessaire
-	// Pour l'instant, on laisse le cache expirer naturellement (24h TTL)
-	_ = game // Pour éviter unused warning
+	// 4. Supprimer les fichiers : sinon ils restent téléchargeables via /files/
+	storage.DeleteGameFiles(toStringSlice(game.Stats["files"]))
+
+	// Le cache n'est pas invalidé (il faudrait un SCAN Redis) : il expire en 24h
 
 	return nil
 }

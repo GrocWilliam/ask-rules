@@ -8,13 +8,13 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
-	"os"
-	"path/filepath"
+	"path"
 	"strings"
 	"sync"
 	"time"
 
 	"ask-rules-server/internal/application/usecase"
+	"ask-rules-server/internal/infrastructure/storage"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -23,20 +23,6 @@ const (
 	maxUploadSize   = 50 << 20 // 50 MB
 	maxMemoryUpload = 8 << 20  // 8 MB gardés en RAM, le reste sur disque
 )
-
-// slugify convertit un texte en slug (copié depuis usecase/helpers.go pour éviter import cyclique)
-func slugify(s string) string {
-	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, " ", "-")
-	s = strings.ReplaceAll(s, "'", "")
-	var result strings.Builder
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-			result.WriteRune(r)
-		}
-	}
-	return result.String()
-}
 
 // ImportHandler gère les requêtes HTTP pour l'import de jeux.
 type ImportHandler struct {
@@ -54,7 +40,7 @@ func NewImportHandler(importUseCase *usecase.ImportGameUseCase, reprocessUseCase
 	}
 }
 
-// downloadFileFromURL télécharge un fichier depuis une URL et le sauvegarde dans uploads/
+// downloadAndSaveFromURL télécharge un fichier depuis une URL et le sauvegarde dans UPLOADS_DIR/{slug}/
 func downloadAndSaveFromURL(url string, slug string) (string, string, error) {
 	// Télécharger le fichier
 	client := &http.Client{
@@ -81,46 +67,23 @@ func downloadAndSaveFromURL(url string, slug string) (string, string, error) {
 	log.Printf("[INFO] downloadAndSaveFromURL - Downloading from %s (Content-Type: %s, Content-Length: %s)",
 		url, resp.Header.Get("Content-Type"), resp.Header.Get("Content-Length"))
 
-	// Extraire le nom du fichier depuis l'URL ou Content-Disposition
+	// Nom de fichier fourni par le serveur distant : nettoyé par storage
+	// (pas de « ../ »), et taille plafonnée comme pour un upload
 	filename := extractFilenameFromURL(url, resp)
-
-	// Créer le répertoire uploads/{slug}/
-	uploadDir := filepath.Join("uploads", slug)
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
-		return "", "", fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	// Créer le fichier de destination
-	destPath := filepath.Join(uploadDir, filename)
-	destFile, err := os.Create(destPath)
+	filePath, size, err := storage.SaveFile(io.LimitReader(resp.Body, maxUploadSize+1), filename, slug)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to create file: %w", err)
-	}
-	defer destFile.Close()
-
-	// Copier le contenu
-	size, err := io.Copy(destFile, resp.Body)
-	if err != nil {
-		os.Remove(destPath)
 		return "", "", fmt.Errorf("failed to save file: %w", err)
 	}
-
-	// Synchroniser sur le disque pour s'assurer que les données sont écrites
-	if err := destFile.Sync(); err != nil {
-		os.Remove(destPath)
-		return "", "", fmt.Errorf("failed to sync file: %w", err)
+	if size == 0 || size > maxUploadSize {
+		storage.DeleteFile(filePath)
+		if size == 0 {
+			return "", "", fmt.Errorf("downloaded file is empty (0 bytes)")
+		}
+		return "", "", fmt.Errorf("file too large (max 50 MB)")
 	}
 
-	// Vérifier que le fichier n'est pas vide
-	if size == 0 {
-		os.Remove(destPath)
-		return "", "", fmt.Errorf("downloaded file is empty (0 bytes)")
-	}
-
-	log.Printf("[INFO] downloadAndSaveFromURL - Downloaded %d bytes to %s", size, destPath)
-
-	// Retourner le chemin relatif (slug/filename) et le nom du fichier
-	return slug + "/" + filename, filename, nil
+	log.Printf("[INFO] downloadAndSaveFromURL - Downloaded %d bytes to %s", size, filePath)
+	return filePath, path.Base(filePath), nil
 }
 
 // extractFilenameFromURL extrait le nom du fichier depuis l'URL ou les headers
@@ -244,6 +207,16 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 		clientMu.Unlock()
 	}()
 
+	// Parser le formulaire multipart avant le premier ping : une fois la réponse
+	// commencée, Go ne permet plus de lire le corps de la requête (upload lent)
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+	// Au-delà de maxMemoryUpload, les fichiers sont écrits dans des fichiers temporaires
+	if err := r.ParseMultipartForm(maxMemoryUpload); err != nil {
+		log.Printf("[ERROR] /api/import - File too large or parse error: %v", err)
+		sendError("File too large (max 50 MB)")
+		return
+	}
+
 	// Heartbeat pour garder la connexion SSE ouverte
 	// Envoie un ping toutes les 10 secondes pour éviter les timeouts proxy/navigateur
 	heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
@@ -270,15 +243,6 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-
-	// Parser le formulaire multipart
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-	// Au-delà de maxMemoryUpload, les fichiers sont écrits dans des fichiers temporaires
-	if err := r.ParseMultipartForm(maxMemoryUpload); err != nil {
-		log.Printf("[ERROR] /api/import - File too large or parse error: %v", err)
-		sendError("File too large (max 50 MB)")
-		return
-	}
 
 	// Récupérer le nom du jeu
 	gameName := r.FormValue("gameName")
@@ -312,7 +276,7 @@ func (h *ImportHandler) Import(w http.ResponseWriter, r *http.Request) {
 		send("downloading", map[string]interface{}{"url": urlStr})
 
 		// Calculer le slug pour créer le bon répertoire
-		slug := slugify(gameName)
+		slug := usecase.Slugify(gameName)
 
 		// Télécharger et sauvegarder directement dans uploads/
 		filePath, filename, err := downloadAndSaveFromURL(urlStr, slug)
@@ -674,7 +638,9 @@ func (h *ImportHandler) StreamJobEvents(w http.ResponseWriter, r *http.Request) 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	lastEventIndex := len(job.Events)
+	// Compteur total plutôt que len(Events) : Events est plafonné (100 derniers),
+	// sa longueur cesse d'augmenter alors que des événements arrivent encore
+	lastEventCount := job.EventCount
 
 	for {
 		select {
@@ -686,10 +652,9 @@ func (h *ImportHandler) StreamJobEvents(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 
-			// Envoyer les nouveaux événements depuis lastEventIndex
-			if len(currentJob.Events) > lastEventIndex {
-				for i := lastEventIndex; i < len(currentJob.Events); i++ {
-					event := currentJob.Events[i]
+			// Envoyer les nouveaux événements (les plus anciens ont pu être retirés)
+			if newCount := currentJob.EventCount - lastEventCount; newCount > 0 {
+				for _, event := range currentJob.Events[max(0, len(currentJob.Events)-newCount):] {
 					data := map[string]interface{}{"type": event.Type}
 					for k, v := range event.Data {
 						data[k] = v
@@ -698,7 +663,7 @@ func (h *ImportHandler) StreamJobEvents(w http.ResponseWriter, r *http.Request) 
 					fmt.Fprintf(w, "data: %s\n\n", b)
 					flusher.Flush()
 				}
-				lastEventIndex = len(currentJob.Events)
+				lastEventCount = currentJob.EventCount
 			}
 
 			// Si le job est terminé, envoyer l'événement final et fermer

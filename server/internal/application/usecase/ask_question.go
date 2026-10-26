@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -41,9 +42,10 @@ func NewAskQuestionUseCase(
 	}
 }
 
-// Limites appliquées à l'historique envoyé par le client : il est rejoué au
-// LLM à chaque question, il doit donc rester court (tokens, latence).
+// Limites appliquées à la question et à l'historique envoyés par le client :
+// ils partent au LLM à chaque question, ils doivent rester courts (tokens, latence).
 const (
+	maxQuestionLen      = 500 // comme MAX_QUESTION_LENGTH côté interface
 	maxHistoryTurns     = 3
 	maxHistoryQuestion  = 500
 	maxHistoryAnswerLen = 2000
@@ -95,11 +97,12 @@ func (uc *AskQuestionUseCase) ExecuteStream(ctx context.Context, req *AskRequest
 	if strings.TrimSpace(req.Question) == "" {
 		return nil, entity.ErrEmptyQuestion
 	}
+	req.Question = truncateRunes(strings.TrimSpace(req.Question), maxQuestionLen)
 
 	// 2. Chercher le jeu par nom
 	game, err := uc.gameRepo.FindByName(ctx, req.GameName)
 	if err != nil {
-		if err == entity.ErrGameNotFound {
+		if errors.Is(err, entity.ErrGameNotFound) {
 			log.Printf("[ERROR] AskQuestion - Game '%s' not found", req.GameName)
 			return nil, fmt.Errorf("game '%s' not found: %w", req.GameName, entity.ErrGameNotFound)
 		}

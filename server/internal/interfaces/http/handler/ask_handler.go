@@ -23,10 +23,14 @@ func NewAskHandler(askUseCase *usecase.AskQuestionUseCase) *AskHandler {
 	return &AskHandler{askUseCase: askUseCase}
 }
 
+// maxAskBody : question + historique (3 échanges) tiennent largement en 64 Ko
+const maxAskBody = 64 << 10
+
 // Handle traite les requêtes POST /api/ask
 func (h *AskHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	// 1. Décoder la requête JSON
 	var req usecase.AskRequest
+	r.Body = http.MaxBytesReader(w, r.Body, maxAskBody)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Printf("[ERROR] /api/ask - Invalid request body: %v", err)
 		h.respondError(w, http.StatusBadRequest, "Invalid request body")
@@ -56,6 +60,7 @@ func (h *AskHandler) Handle(w http.ResponseWriter, r *http.Request) {
 // pour /api/ask.
 func (h *AskHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 	var req usecase.AskRequest
+	r.Body = http.MaxBytesReader(w, r.Body, maxAskBody)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Printf("[ERROR] /api/ask/stream - Invalid request body: %v", err)
 		h.respondError(w, http.StatusBadRequest, "Invalid request body")

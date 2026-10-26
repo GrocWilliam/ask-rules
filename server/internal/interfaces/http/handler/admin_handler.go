@@ -3,6 +3,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -31,7 +32,7 @@ func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	response, err := h.authUseCase.Login(r.Context(), &req)
 	if err != nil {
-		if err == usecase.ErrInvalidPassword {
+		if errors.Is(err, usecase.ErrInvalidPassword) {
 			log.Printf("[WARN] /api/admin/login - Invalid password attempt")
 			respondError(w, http.StatusUnauthorized, "Invalid password")
 			return
@@ -47,6 +48,7 @@ func (h *AdminHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Value:    response.Token,
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
 		SameSite: http.SameSiteStrictMode,
 		Expires:  response.Expires,
 	})

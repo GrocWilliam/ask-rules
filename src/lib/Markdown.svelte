@@ -1,23 +1,42 @@
-<script lang="ts">
+<script lang="ts" module>
   import { marked } from 'marked';
 
+  // Le contenu vient du LLM, qu'un PDF piégé peut pousser à écrire du HTML :
+  // tout HTML est échappé, sauf les liens de citation ajoutés par linkCitations.
+  const CITATION_TAG =
+    /^(<a href="\/files\/[^"<>]*" class="citation" target="_blank" rel="noopener" title="[^"<>]*">|<\/a>)$/;
+  const SAFE_HREF = /^(https?:|mailto:|\/|#)/i;
+
+  const escapeHtml = (s: string) =>
+    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  marked.use({
+    breaks: true, // Les sauts de ligne deviennent des <br>
+    gfm: true, // GitHub Flavored Markdown
+    renderer: {
+      // false : rendu par défaut de marked
+      html: ({ text }) => (CITATION_TAG.test(text.trim()) ? false : escapeHtml(text)),
+      // Pas de lien javascript: ou data: : seul le texte est gardé
+      link(token) {
+        return SAFE_HREF.test(token.href) ? false : this.parser.parseInline(token.tokens);
+      },
+    },
+  });
+</script>
+
+<script lang="ts">
   interface Props {
     content: string;
   }
 
   let { content }: Props = $props();
 
-  // Configure marked pour plus de sécurité et un meilleur rendu
-  marked.setOptions({
-    breaks: true, // Les sauts de ligne deviennent des <br>
-    gfm: true, // GitHub Flavored Markdown
-  });
-
   // Convertit le markdown en HTML
   const html = $derived(marked.parse(content) as string);
 </script>
 
 <div class="markdown-content">
+  <!-- eslint-disable-next-line svelte/no-at-html-tags -- HTML échappé par le renderer marked ci-dessus -->
   {@html html}
 </div>
 

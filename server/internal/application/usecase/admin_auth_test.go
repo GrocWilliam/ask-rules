@@ -173,3 +173,10 @@ func TestAdminAuthUseCase_MultipleSessions(t *testing.T) {
 		t.Error("Expected second session to still be valid")
 	}
 }
+
+func TestAdminAuthUseCase_Login_DisabledWithoutPassword(t *testing.T) {
+	uc := usecase.NewAdminAuthUseCase("", nil)
+	if _, err := uc.Login(context.Background(), &usecase.LoginRequest{Password: ""}); err != usecase.ErrInvalidPassword {
+		t.Fatalf("sans ADMIN_PASSWORD, la connexion doit être refusée, obtenu : %v", err)
+	}
+}

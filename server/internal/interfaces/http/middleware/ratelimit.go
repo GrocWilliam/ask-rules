@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -14,8 +15,7 @@ import (
 // RateLimit limite chaque adresse IP à `perMinute` requêtes par minute (seau à
 // jetons : jusqu'à `perMinute` requêtes d'affilée, puis une toutes les
 // 60/perMinute secondes). Protège le quota du LLM contre les abus.
-// L'IP vient de r.RemoteAddr : placer middleware.RealIP avant, derrière un
-// proxy de confiance (nginx écrase X-Real-IP).
+// L'IP vient de r.RemoteAddr : placer RealIP avant.
 // perMinute <= 0 désactive la limite.
 func RateLimit(perMinute int) func(http.Handler) http.Handler {
 	if perMinute <= 0 {
@@ -29,13 +29,25 @@ func RateLimit(perMinute int) func(http.Handler) http.Handler {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
 				json.NewEncoder(w).Encode(map[string]string{
-					"error": "Trop de questions d'affilée. Patientez quelques secondes avant de réessayer.",
+					"error": "Trop de requêtes d'affilée. Patientez quelques secondes avant de réessayer.",
 				})
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// RealIP remplace RemoteAddr par X-Real-IP, que nginx écrase avec l'IP du client.
+// Contrairement à middleware.RealIP de chi, ignore True-Client-IP et
+// X-Forwarded-For : le client peut les forger et nginx les transmet tels quels.
+func RealIP(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ip := strings.TrimSpace(r.Header.Get("X-Real-IP")); net.ParseIP(ip) != nil {
+			r.RemoteAddr = ip
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // clientIP retire le port de RemoteAddr ("1.2.3.4:5678" → "1.2.3.4") ; RealIP

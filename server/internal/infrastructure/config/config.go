@@ -75,7 +75,7 @@ func Load() error {
 		DatabaseURL:           getEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/ask-rules"),
 		LLM:                   loadLLMProvider("LLM_"),
 		LLMFallback:           loadLLMProvider("LLM_FALLBACK_"),
-		AdminPassword:         getEnv("ADMIN_PASSWORD", "admin"),
+		AdminPassword:         getEnv("ADMIN_PASSWORD", ""),
 		AskRateLimitPerMinute: getEnvIntAllowZero("ASK_RATE_LIMIT_PER_MINUTE", 10),
 		RedisEnabled:          getEnvBool("REDIS_ENABLED", false),
 		RedisURL:              getEnv("REDIS_URL", "redis://localhost:6379"),

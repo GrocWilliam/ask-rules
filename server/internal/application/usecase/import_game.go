@@ -7,6 +7,7 @@ import (
 	"log"
 	"mime/multipart"
 	"runtime"
+	"slices"
 	"time"
 
 	"ask-rules-server/internal/domain/entity"
@@ -81,7 +82,7 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 	// Vérifier si le jeu existe déjà
 	existingGame, _ := uc.gameRepo.FindByName(ctx, req.GameName)
 	isNew := existingGame == nil
-	slug := slugify(req.GameName)
+	slug := Slugify(req.GameName)
 
 	var game *entity.Game
 	if isNew {
@@ -128,16 +129,24 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 		game.Stats = make(map[string]interface{})
 	}
 	// En mode merge, conserver les fichiers existants ; en mode replace, remplacer
+	var replaced []string
 	if !isNew && req.Mode == "merge" {
 		existing := toStringSlice(game.Stats["files"])
 		game.Stats["files"] = mergeUnique(existing, filePaths)
 	} else {
+		for _, f := range toStringSlice(game.Stats["files"]) {
+			if !slices.Contains(filePaths, f) {
+				replaced = append(replaced, f)
+			}
+		}
 		game.Stats["files"] = filePaths
 	}
 	if err := uc.gameRepo.Save(ctx, game); err != nil {
 		log.Printf("[ERROR] ImportGame - Failed to save game '%s': %v", req.GameName, err)
 		return fmt.Errorf("failed to save game: %w", err)
 	}
+	// Anciens fichiers remplacés : sinon ils restent téléchargeables via /files/
+	storage.DeleteGameFiles(replaced)
 
 	// Si mode "replace", supprimer les sections existantes
 	if !isNew && req.Mode == "replace" {

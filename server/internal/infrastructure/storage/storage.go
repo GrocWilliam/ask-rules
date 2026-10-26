@@ -17,36 +17,36 @@ func GetAbsolutePath(rel string) string {
 	return filepath.Join(config.C.UploadsDir, rel)
 }
 
-func GetRelativePath(abs string) string {
-	base, _ := filepath.Abs(config.C.UploadsDir)
-	rel, err := filepath.Rel(base, abs)
-	if err != nil {
-		return abs
-	}
-	return rel
-}
-
 func SaveUploadedFile(header *multipart.FileHeader, slug string) (string, error) {
-	dir := filepath.Join(config.C.UploadsDir, slug)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", fmt.Errorf("mkdir: %w", err)
-	}
-	filename := sanitizeFilename(header.Filename)
-	destPath := filepath.Join(dir, filename)
 	src, err := header.Open()
 	if err != nil {
 		return "", err
 	}
 	defer src.Close()
+	path, _, err := SaveFile(src, header.Filename, slug)
+	return path, err
+}
+
+// SaveFile écrit src dans UPLOADS_DIR/{slug}/ sous un nom nettoyé et retourne
+// le chemin relatif (slug/fichier) et le nombre d'octets écrits.
+func SaveFile(src io.Reader, name, slug string) (string, int64, error) {
+	dir := filepath.Join(config.C.UploadsDir, slug)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", 0, fmt.Errorf("mkdir: %w", err)
+	}
+	filename := sanitizeFilename(name)
+	destPath := filepath.Join(dir, filename)
 	dst, err := os.Create(destPath)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer dst.Close()
-	if _, err := io.Copy(dst, src); err != nil {
-		return "", err
+	size, err := io.Copy(dst, src)
+	if err != nil {
+		os.Remove(destPath)
+		return "", size, err
 	}
-	return slug + "/" + filename, nil
+	return slug + "/" + filename, size, nil
 }
 
 func DeleteGameFiles(paths []string) {
@@ -63,15 +63,6 @@ func DeleteGameFiles(paths []string) {
 
 func DeleteFile(path string) error {
 	return os.Remove(GetAbsolutePath(path))
-}
-
-func ReadFile(path string) ([]byte, error) {
-	return os.ReadFile(GetAbsolutePath(path))
-}
-
-func FileExists(path string) bool {
-	_, err := os.Stat(GetAbsolutePath(path))
-	return err == nil
 }
 
 var (
@@ -93,8 +84,11 @@ var (
 )
 
 func sanitizeFilename(name string) string {
-	ext := filepath.Ext(name)
-	base := strings.TrimSuffix(name, ext)
+	// Dernier segment seulement (« ../../x » → « x »), séparateurs Windows compris
+	name = filepath.Base(strings.ReplaceAll(name, "\\", "/"))
+	rawExt := filepath.Ext(name)
+	base := strings.TrimSuffix(name, rawExt)
+	ext := nonAlpha.ReplaceAllString(rawExt, "_")
 	base = diacritics.Replace(base)
 	var b strings.Builder
 	for _, r := range base {
@@ -105,7 +99,7 @@ func sanitizeFilename(name string) string {
 		}
 	}
 	safe := nonAlpha.ReplaceAllString(b.String(), "_")
-	if safe == "" {
+	if strings.Trim(safe, ".") == "" {
 		safe = "file"
 	}
 	return safe + ext

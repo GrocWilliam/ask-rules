@@ -4,6 +4,7 @@ package usecase
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"sync"
@@ -53,7 +54,9 @@ type LoginResponse struct {
 
 // Login vérifie le mot de passe et crée une session.
 func (uc *AdminAuthUseCase) Login(ctx context.Context, req *LoginRequest) (*LoginResponse, error) {
-	if req.Password != uc.adminPassword {
+	// Sans ADMIN_PASSWORD, l'admin est désactivé (pas de mot de passe par défaut).
+	// Comparaison à temps constant : la durée ne révèle pas le préfixe correct.
+	if uc.adminPassword == "" || subtle.ConstantTimeCompare([]byte(req.Password), []byte(uc.adminPassword)) != 1 {
 		if uc.logRepo != nil {
 			_ = uc.logRepo.Save(ctx, &LogEntry{
 				EventType: "admin_login_failed",

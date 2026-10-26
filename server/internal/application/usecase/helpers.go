@@ -7,11 +7,11 @@ import (
 
 // generateGameID génère l'ID d'un jeu à partir de son nom (slug stable et lisible).
 func generateGameID(name string) string {
-	return slugify(name)
+	return Slugify(name)
 }
 
-// slugify convertit un texte en slug.
-func slugify(s string) string {
+// Slugify convertit un texte en slug (aussi le dossier des fichiers du jeu).
+func Slugify(s string) string {
 	s = strings.ToLower(s)
 	s = strings.ReplaceAll(s, " ", "-")
 	s = strings.ReplaceAll(s, "'", "")

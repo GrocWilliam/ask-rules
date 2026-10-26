@@ -3,6 +3,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -59,7 +60,7 @@ func (h *GamesHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	game, err := h.getUseCase.Execute(r.Context(), gameID)
 	if err != nil {
-		if err == entity.ErrGameNotFound {
+		if errors.Is(err, entity.ErrGameNotFound) {
 			log.Printf("[ERROR] /api/games/{id} - Game not found: %s", gameID)
 			respondError(w, http.StatusNotFound, "Game not found")
 			return
@@ -90,7 +91,7 @@ func (h *GamesHandler) Upsert(w http.ResponseWriter, r *http.Request) {
 
 	game, err := h.upsertUseCase.Execute(r.Context(), &req)
 	if err != nil {
-		if err == entity.ErrInvalidGameName {
+		if errors.Is(err, entity.ErrInvalidGameName) {
 			log.Printf("[ERROR] /api/admin/games - Invalid game name: %v", err)
 			respondError(w, http.StatusBadRequest, "Invalid game name")
 			return
@@ -113,7 +114,7 @@ func (h *GamesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	err := h.deleteUseCase.Execute(r.Context(), gameID)
 	if err != nil {
-		if err == entity.ErrGameNotFound {
+		if errors.Is(err, entity.ErrGameNotFound) {
 			respondError(w, http.StatusNotFound, err.Error())
 			return
 		}

@@ -44,8 +44,8 @@ func NewRouter(cfg *Config) *chi.Mux {
 	// Request ID pour le traçage
 	r.Use(middleware.RequestID)
 
-	// Real IP extraction
-	r.Use(middleware.RealIP)
+	// IP du client (X-Real-IP posé par nginx), pour les logs et la limite de débit
+	r.Use(customMiddleware.RealIP)
 
 	// CORS
 	r.Use(cors.Handler(cors.Options{
@@ -81,8 +81,8 @@ func NewRouter(cfg *Config) *chi.Mux {
 
 		// Routes d'administration
 		r.Route("/admin", func(r chi.Router) {
-			// Authentification admin (sans middleware, avec timeout court)
-			r.With(middleware.Timeout(10*time.Second)).Post("/login", cfg.AdminHandler.Login)
+			// Authentification admin (avec timeout court), 5 essais par minute et par IP
+			r.With(customMiddleware.RateLimit(5), middleware.Timeout(10*time.Second)).Post("/login", cfg.AdminHandler.Login)
 			r.With(middleware.Timeout(10*time.Second)).Post("/logout", cfg.AdminHandler.Logout)
 			r.With(middleware.Timeout(10*time.Second)).Get("/check", cfg.AdminHandler.Check)
 

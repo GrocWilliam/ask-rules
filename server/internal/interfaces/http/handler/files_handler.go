@@ -2,6 +2,8 @@
 package handler
 
 import (
+	"errors"
+	"io/fs"
 	"log"
 	"net/http"
 
@@ -59,7 +61,7 @@ func (h *FilesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 	err := h.deleteUseCase.Execute(r.Context(), slug, filename)
 	if err != nil {
-		if err.Error() == "file not found" || err.Error() == "file not found: stat" {
+		if errors.Is(err, fs.ErrNotExist) {
 			log.Printf("[ERROR] /api/admin/files - File not found: %s/%s", slug, filename)
 			respondError(w, http.StatusNotFound, "File not found")
 			return

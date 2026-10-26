@@ -71,3 +71,23 @@ func TestClientIP(t *testing.T) {
 		}
 	}
 }
+
+func TestRealIP_IgnoresSpoofableHeaders(t *testing.T) {
+	var got string
+	h := RealIP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = r.RemoteAddr }))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/ask", nil)
+	req.RemoteAddr = "10.0.0.1:5000"
+	req.Header.Set("True-Client-IP", "1.2.3.4")
+	req.Header.Set("X-Forwarded-For", "5.6.7.8")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if got != "10.0.0.1:5000" {
+		t.Fatalf("True-Client-IP / X-Forwarded-For ne doivent pas changer l'IP : %q", got)
+	}
+
+	req.Header.Set("X-Real-IP", "9.9.9.9")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if got != "9.9.9.9" {
+		t.Fatalf("X-Real-IP (nginx) doit donner l'IP : %q", got)
+	}
+}

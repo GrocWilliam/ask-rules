@@ -42,7 +42,9 @@ type Job struct {
 	StartedAt   time.Time  `json:"started_at"`
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 	Events      []JobEvent `json:"events"`
-	Error       string     `json:"error,omitempty"`
+	// EventCount : nombre total d'événements reçus, y compris ceux retirés de Events
+	EventCount int    `json:"event_count"`
+	Error      string `json:"error,omitempty"`
 
 	// Compteurs pour affichage rapide
 	Progress *JobProgress `json:"progress,omitempty"`
@@ -121,6 +123,7 @@ func (t *JobTracker) AddEvent(jobID, eventType string, data map[string]interface
 		Timestamp: time.Now(),
 	}
 
+	job.EventCount++
 	// Limiter le nombre d'événements stockés
 	if len(job.Events) >= t.maxEvents {
 		// Garder seulement les (maxEvents - 1) derniers + le nouveau
@@ -207,6 +210,7 @@ func (t *JobTracker) GetJob(jobID string) (*Job, bool) {
 		StartedAt:   job.StartedAt,
 		CompletedAt: job.CompletedAt,
 		Error:       job.Error,
+		EventCount:  job.EventCount,
 		Events:      make([]JobEvent, len(job.Events)),
 	}
 	copy(jobCopy.Events, job.Events)
