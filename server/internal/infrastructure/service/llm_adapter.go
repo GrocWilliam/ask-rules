@@ -64,22 +64,24 @@ type chatProvider struct {
 	health  *healthState // nil si LLM_HEALTH_URL n'est pas défini
 }
 
-func newChatProvider(c config.LLMProvider, client *http.Client) (chatProvider, bool) {
-	if c.BaseURL == "" {
+func newChatProvider(llmConfig config.LLMProvider, client *http.Client) (chatProvider, bool) {
+	if llmConfig.BaseURL == "" {
 		return chatProvider{}, false
 	}
-	name := c.BaseURL
-	if u, err := url.Parse(c.BaseURL); err == nil && u.Host != "" {
+
+	name := llmConfig.BaseURL
+	if u, err := url.Parse(llmConfig.BaseURL); err == nil && u.Host != "" {
 		name = u.Host
 	}
+
 	return chatProvider{
 		name:    name,
-		url:     strings.TrimRight(c.BaseURL, "/") + "/chat/completions",
-		apiKey:  c.APIKey,
-		model:   c.Model,
-		timeout: c.Timeout,
-		pacer:   newPacer(c.RequestsPerSecond),
-		health:  newHealthState(name, c.HealthURL, c.WakeTimeout, client),
+		url:     strings.TrimRight(llmConfig.BaseURL, "/") + "/chat/completions",
+		apiKey:  llmConfig.APIKey,
+		model:   llmConfig.Model,
+		timeout: llmConfig.Timeout,
+		pacer:   newPacer(llmConfig.RequestsPerSecond),
+		health:  newHealthState(name, llmConfig.HealthURL, llmConfig.WakeTimeout, client),
 	}, true
 }
 
@@ -102,9 +104,9 @@ func NewLLM() service.LLMService {
 			},
 		},
 	}
-	for _, c := range []config.LLMProvider{config.C.LLM, config.C.LLMFallback} {
-		if p, ok := newChatProvider(c, m.client); ok {
-			m.providers = append(m.providers, p)
+	for _, llmConfig := range []config.LLMProvider{config.C.LLM, config.C.LLMFallback} {
+		if llmProvider, ok := newChatProvider(llmConfig, m.client); ok {
+			m.providers = append(m.providers, llmProvider)
 		}
 	}
 	return m
@@ -216,35 +218,35 @@ func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxTex
 		}
 	}
 	var errs []string
-	for i, p := range m.providers {
+	for i, llmProvider := range m.providers {
 		isLast := i == len(m.providers)-1
 		retries := llmMaxRetries
 		if !isLast {
 			retries = 0
 		}
-		if p.health != nil {
+		if llmProvider.health != nil {
 			if isLast {
 				// Pas d'autre fournisseur : attendre le réveil (dans la limite de la requête)
-				if err := p.health.waitReady(ctx); err != nil {
-					return entity.LLMResponse{}, fmt.Errorf("%s: en veille, réveil trop long : %w", p.name, err)
+				if err := llmProvider.health.waitReady(ctx); err != nil {
+					return entity.LLMResponse{}, fmt.Errorf("%s: en veille, réveil trop long : %w", llmProvider.name, err)
 				}
-			} else if !p.health.ready(ctx) {
-				log.Printf("[INFO] LLM - %s en veille, bascule sur %s", p.name, m.providers[i+1].name)
-				errs = append(errs, p.name+": en veille")
+			} else if !llmProvider.health.ready(ctx) {
+				log.Printf("[INFO] LLM - %s en veille, bascule sur %s", llmProvider.name, m.providers[i+1].name)
+				errs = append(errs, llmProvider.name+": en veille")
 				continue
 			}
 		}
-		resp, err := m.queryChat(ctx, p, retries, question, ctxText, history, onToken)
-		if p.health != nil {
+		resp, err := m.queryChat(ctx, llmProvider, retries, question, ctxText, history, onToken)
+		if llmProvider.health != nil {
 			if err == nil {
-				p.health.markOK()
+				llmProvider.health.markOK()
 			} else {
-				p.health.markDown()
+				llmProvider.health.markDown()
 			}
 		}
 		if err == nil {
 			if i > 0 {
-				log.Printf("[INFO] LLM - réponse fournie par %s (secours)", p.name)
+				log.Printf("[INFO] LLM - réponse fournie par %s (secours)", llmProvider.name)
 			}
 			return resp, nil
 		}
@@ -256,7 +258,7 @@ func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxTex
 			}
 			return entity.LLMResponse{}, err
 		}
-		log.Printf("[WARN] LLM - %s indisponible, bascule sur %s : %v", p.name, m.providers[i+1].name, err)
+		log.Printf("[WARN] LLM - %s indisponible, bascule sur %s : %v", llmProvider.name, m.providers[i+1].name, err)
 		errs = append(errs, err.Error())
 	}
 	return entity.LLMResponse{}, fmt.Errorf("aucun fournisseur LLM configuré")
@@ -313,6 +315,7 @@ type chatResponse struct {
 func buildMessages(question, ctxText string, history []entity.ChatTurn) []chatMessage {
 	messages := make([]chatMessage, 0, 2+2*len(history))
 	messages = append(messages, chatMessage{Role: "system", Content: systemPrompt})
+
 	for _, turn := range history {
 		messages = append(messages,
 			chatMessage{Role: "user", Content: turn.Question},
@@ -352,14 +355,14 @@ func chatContentText(raw json.RawMessage) (string, error) {
 	return b.String(), nil
 }
 
-func (m *ChatLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRetries int, question, ctxText string, history []entity.ChatTurn, onToken func(string)) (entity.LLMResponse, error) {
-	if p.timeout > 0 {
+func (m *ChatLLMAdapter) queryChat(ctx context.Context, llmProvider chatProvider, maxRetries int, question, ctxText string, history []entity.ChatTurn, onToken func(string)) (entity.LLMResponse, error) {
+	if llmProvider.timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, p.timeout)
+		ctx, cancel = context.WithTimeout(ctx, llmProvider.timeout)
 		defer cancel()
 	}
 	body, _ := json.Marshal(chatRequest{
-		Model:       p.model,
+		Model:       llmProvider.model,
 		Messages:    buildMessages(question, ctxText, history),
 		MaxTokens:   llmMaxTokens,
 		Temperature: 0.3,
@@ -367,36 +370,36 @@ func (m *ChatLLMAdapter) queryChat(ctx context.Context, p chatProvider, maxRetri
 	})
 
 	headers := map[string]string{}
-	if p.apiKey != "" {
-		headers["Authorization"] = "Bearer " + p.apiKey
+	if llmProvider.apiKey != "" {
+		headers["Authorization"] = "Bearer " + llmProvider.apiKey
 	}
-	resp, err := postJSONWithRetry(ctx, m.client, p.pacer, p.name, p.url, headers, body, maxRetries)
+	resp, err := postJSONWithRetry(ctx, m.client, llmProvider.pacer, llmProvider.name, llmProvider.url, headers, body, maxRetries)
 	if err != nil {
 		return entity.LLMResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	if onToken != nil {
-		return readChatStream(p.name, resp.Body, onToken)
+		return readChatStream(llmProvider.name, resp.Body, onToken)
 	}
 
 	var result chatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return entity.LLMResponse{}, fmt.Errorf("%s: %w", p.name, err)
+		return entity.LLMResponse{}, fmt.Errorf("%s: %w", llmProvider.name, err)
 	}
 	if len(result.Choices) == 0 {
-		return entity.LLMResponse{}, fmt.Errorf("%s: pas de réponse", p.name)
+		return entity.LLMResponse{}, fmt.Errorf("%s: pas de réponse", llmProvider.name)
 	}
 	choice := result.Choices[0]
 	answer, err := chatContentText(choice.Message.Content)
 	if err != nil {
-		return entity.LLMResponse{}, fmt.Errorf("%s: %w", p.name, err)
+		return entity.LLMResponse{}, fmt.Errorf("%s: %w", llmProvider.name, err)
 	}
 	if strings.TrimSpace(answer) == "" {
-		return entity.LLMResponse{}, fmt.Errorf("%s: réponse vide (finish_reason=%s)", p.name, choice.FinishReason)
+		return entity.LLMResponse{}, fmt.Errorf("%s: réponse vide (finish_reason=%s)", llmProvider.name, choice.FinishReason)
 	}
 	if choice.FinishReason == "length" {
-		log.Printf("[WARN] %s - réponse tronquée à %d tokens (id=%s)", p.name, llmMaxTokens, result.ID)
+		log.Printf("[WARN] %s - réponse tronquée à %d tokens (id=%s)", llmProvider.name, llmMaxTokens, result.ID)
 	}
 
 	return entity.LLMResponse{
