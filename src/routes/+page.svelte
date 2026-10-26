@@ -11,9 +11,9 @@
   import { keepScreenOn } from '$lib/wakeLock';
   import VoiceInput from '$lib/VoiceInput.svelte';
   import {
-    conversations,
     addExchange,
     contextTurns,
+    type Conversation,
     type Exchange,
     type SectionResult,
   } from '$lib/chatHistory';
@@ -84,8 +84,7 @@
   );
 
   // Conversation affichée (null = nouvelle conversation)
-  let currentId: string | null = null;
-  $: current = $conversations.find((c) => c.id === currentId);
+  let current: Conversation | null = null;
   $: currentFiles =
     [...(current?.exchanges ?? [])].reverse().find((e) => e.file_path?.length)?.file_path ?? null;
 
@@ -120,7 +119,7 @@
     gameError = '';
     rememberGame(name);
     // Le contexte d'une conversation est propre à un jeu
-    if (current && current.game !== name) currentId = null;
+    if (current && current.game !== name) current = null;
   }
 
   function clearGame() {
@@ -128,12 +127,12 @@
     selectedGameLabel = '';
     gameSearch = '';
     showGameDropdown = false;
-    currentId = null;
+    current = null;
     rememberGame('');
   }
 
   function newConversation() {
-    currentId = null;
+    current = null;
     questionText = '';
   }
 
@@ -227,10 +226,10 @@
     }
     // Conversation figée au moment de l'envoi : la réponse y est ajoutée même
     // si l'utilisateur change de jeu entre-temps
-    const conversationId = current?.game === game ? currentId : null;
-    const history = conversationId ? contextTurns(current) : [];
+    const conversation = current?.game === game ? current : null;
+    const history = contextTurns(conversation);
 
-    currentId = conversationId;
+    current = conversation;
     isLoading = true;
     pendingQuestion = question;
     pendingGame = game;
@@ -238,7 +237,7 @@
     questionText = '';
     scrollToEnd();
 
-    let exchange: Exchange = { question, at: Date.now() };
+    let exchange: Exchange = { question };
     try {
       const data = await askStream({ question, game, history }, (text) => {
         pendingAnswer += text;
@@ -255,7 +254,7 @@
     } catch (err) {
       exchange.error = err instanceof Error ? err.message : 'Erreur serveur';
     } finally {
-      currentId = addExchange(conversationId, game, exchange);
+      current = addExchange(conversation, game, exchange);
       isLoading = false;
       pendingQuestion = '';
       pendingAnswer = '';
@@ -674,6 +673,70 @@
     display: flex;
     align-items: center;
     color: var(--text-muted);
+  }
+
+  .suggested-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .tag-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 1rem;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.875rem;
+    color: rgba(255, 255, 255, 0.75);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-family: inherit;
+    white-space: nowrap;
+  }
+
+  .tag-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.95);
+    transform: translateY(-1px);
+  }
+
+  .tag-btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .tag-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .question-wrapper {
+    position: relative;
+    width: 100%;
+  }
+
+  .char-counter {
+    position: absolute;
+    bottom: 0.5rem;
+    right: 0.75rem;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.4);
+    background: rgba(0, 0, 0, 0.3);
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.375rem;
+    backdrop-filter: blur(4px);
+    pointer-events: none;
+    transition: color 0.3s ease;
+  }
+
+  .char-counter.warning {
+    color: rgba(255, 200, 100, 0.8);
+  }
+
+  .char-counter.danger {
+    color: rgba(255, 100, 100, 0.9);
+    font-weight: 600;
   }
 
   /* ── Searchable game selector ─────────────────────────── */

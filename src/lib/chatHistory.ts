@@ -2,14 +2,17 @@
 //
 // Les derniers échanges de la conversation en cours sont renvoyés à /api/ask
 // pour que le LLM comprenne les questions de suivi.
-import { writable } from 'svelte/store';
 
-const MAX_CONVERSATIONS = 30;
 const MAX_EXCHANGES = 30;
 /** Nombre d'échanges renvoyés au serveur (il en garde 3 au plus) */
 const CONTEXT_TURNS = 3;
-/** Seul un extrait des sections est affiché : inutile de stocker le reste */
-const SECTION_EXCERPT_LENGTH = 220;
+
+// Ancien historique sauvegardé dans le navigateur : on l'efface
+try {
+  localStorage.removeItem('ask-rules:conversations');
+} catch {
+  // rendu serveur ou stockage indisponible : rien à effacer
+}
 
 export type SectionResult = {
   title: string;
@@ -22,7 +25,6 @@ export type SectionResult = {
 
 export type Exchange = {
   question: string;
-  at: number;
   answer?: string;
   model?: string;
   sections?: SectionResult[];
@@ -33,65 +35,25 @@ export type Exchange = {
 };
 
 export type Conversation = {
-  id: string;
   game: string;
-  createdAt: number;
-  updatedAt: number;
   exchanges: Exchange[];
 };
 
 export type ChatTurn = { question: string; answer: string };
 
-/** Conversations triées de la plus récente à la plus ancienne */
-export const conversations = writable<Conversation[]>([]);
-
-function newId(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function compact(exchange: Exchange): Exchange {
-  return {
-    ...exchange,
-    sections: exchange.sections?.map((s) => ({
-      ...s,
-      content: s.content.slice(0, SECTION_EXCERPT_LENGTH),
-    })),
-  };
-}
-
-/**
- * Ajoute un échange à la conversation `id` (créée si `id` est null) et
- * retourne l'identifiant de la conversation.
- */
-export function addExchange(id: string | null, game: string, exchange: Exchange): string {
-  const conversationId = id ?? newId();
-  conversations.update((list) => {
-    const existing = list.find((c) => c.id === conversationId);
-    const conversation: Conversation = existing
-      ? {
-          ...existing,
-          updatedAt: exchange.at,
-          exchanges: [...existing.exchanges, compact(exchange)].slice(-MAX_EXCHANGES),
-        }
-      : {
-          id: conversationId,
-          game,
-          createdAt: exchange.at,
-          updatedAt: exchange.at,
-          exchanges: [compact(exchange)],
-        };
-    return [conversation, ...list.filter((c) => c.id !== conversationId)].slice(
-      0,
-      MAX_CONVERSATIONS
-    );
-  });
-  return conversationId;
+/** Ajoute un échange à la conversation (créée si elle est null) */
+export function addExchange(
+  conversation: Conversation | null,
+  game: string,
+  exchange: Exchange
+): Conversation {
+  return conversation
+    ? { ...conversation, exchanges: [...conversation.exchanges, exchange].slice(-MAX_EXCHANGES) }
+    : { game, exchanges: [exchange] };
 }
 
 /** Derniers échanges réussis, à envoyer comme contexte de la question suivante */
-export function contextTurns(conversation: Conversation | undefined): ChatTurn[] {
+export function contextTurns(conversation: Conversation | null): ChatTurn[] {
   if (!conversation) return [];
   return conversation.exchanges
     .filter((e) => !e.error && e.answer && e.model)

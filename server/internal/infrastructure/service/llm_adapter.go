@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -43,6 +44,10 @@ Exemple pour « Comment gagne-t-on ? » :
 Exemple pour « Peut-on jouer deux cartes dans le même tour ? » :
 **Non, une seule carte par tour (p. 3).**
 - Exception : la carte « Renfort » permet d'en jouer une seconde (p. 7).`
+
+// fillerOpening : accusé de réception en tête de réponse (« Ok, », « D'accord. »…),
+// retiré malgré la consigne du prompt qu'un petit modèle ne suit pas toujours.
+var fillerOpening = regexp.MustCompile(`(?i)^\s*(ok|okay|d'accord|d’accord|bien sûr|très bien)\b\s*[,.!:]?\s*`)
 
 // llmMaxTokens : longueur max d'une réponse (~750 mots), largement suffisante
 // pour une règle de jeu. Limite aussi la consommation du quota de tokens.
@@ -114,9 +119,17 @@ func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string
 		return &service.LLMResponse{Answer: contextText, UsedLLM: false}, nil
 	}
 
+	var strip *fillerStripper
+	if onToken != nil {
+		strip = &fillerStripper{out: onToken}
+		onToken = strip.write
+	}
 	resp, err := m.queryWithFallback(ctx, question, contextText, history, onToken)
 	if err != nil {
 		return nil, err
+	}
+	if strip != nil {
+		strip.flush()
 	}
 
 	// Convertir entity.LLMResponse → service.LLMResponse
@@ -130,11 +143,52 @@ func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string
 	}
 
 	return &service.LLMResponse{
-		Answer:     resp.Answer,
+		Answer:     stripFiller(resp.Answer),
 		Model:      resp.Model,
 		UsedLLM:    resp.UsedLLM,
 		TokensUsed: tokensUsed,
 	}, nil
+}
+
+// stripFiller retire fillerOpening, sauf si la réponse ne contient rien d'autre.
+func stripFiller(s string) string {
+	if t := fillerOpening.ReplaceAllString(s, ""); strings.TrimSpace(t) != "" {
+		return t
+	}
+	return s
+}
+
+// fillerStripper retient le début du flux, le temps de pouvoir retirer
+// fillerOpening, puis laisse passer le reste tel quel.
+type fillerStripper struct {
+	out  func(string)
+	head strings.Builder
+	done bool
+}
+
+// fillerHeadLen : assez d'octets pour contenir la plus longue formule retirée
+const fillerHeadLen = 24
+
+func (f *fillerStripper) write(s string) {
+	if f.done {
+		f.out(s)
+		return
+	}
+	f.head.WriteString(s)
+	if f.head.Len() >= fillerHeadLen {
+		f.flush()
+	}
+}
+
+// flush envoie le début retenu (appelé aussi en fin de flux, pour une réponse courte).
+func (f *fillerStripper) flush() {
+	if f.done {
+		return
+	}
+	f.done = true
+	if head := stripFiller(f.head.String()); head != "" {
+		f.out(head)
+	}
 }
 
 // Warmup réveille en arrière-plan les fournisseurs mis en veille, pour qu'ils
@@ -265,8 +319,9 @@ func buildMessages(question, ctxText string, history []entity.ChatTurn) []chatMe
 			chatMessage{Role: "assistant", Content: turn.Answer},
 		)
 	}
-	// Pas de consigne dans ce message : un petit modèle y répond par « Ok, … »
-	prompt := fmt.Sprintf("Extraits du livret :\n---\n%s\n---\n\nQuestion : %s", ctxText, question)
+	// Pas de consigne à l'impératif ici : un petit modèle y répond par « Ok, … ».
+	// Le rappel de ne citer que les extraits reste dans le titre, au plus près de la question.
+	prompt := fmt.Sprintf("Extraits du livret (seule source autorisée) :\n---\n%s\n---\n\nQuestion : %s", ctxText, question)
 	return append(messages, chatMessage{Role: "user", Content: prompt})
 }
 

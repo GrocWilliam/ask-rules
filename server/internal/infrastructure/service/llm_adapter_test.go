@@ -79,3 +79,34 @@ func TestBuildMessages_NoHistory(t *testing.T) {
 		t.Fatalf("attendu system + user, reçu %d messages", len(msgs))
 	}
 }
+
+func TestBuildMessages_NoInstructionInQuestion(t *testing.T) {
+	msgs := buildMessages("Comment gagner ?", "ctx", nil)
+	if last := msgs[len(msgs)-1].Content; strings.Contains(last, "Réponds") {
+		t.Fatalf("une consigne dans le message utilisateur fait répondre « Ok, … » : %q", last)
+	}
+}
+
+func TestFillerStripper(t *testing.T) {
+	cases := []struct {
+		chunks []string
+		want   string
+	}{
+		{[]string{"Ok", ", on pio", "che une carte ", "puis on la joue (p. 2)."}, "on pioche une carte puis on la joue (p. 2)."},
+		{[]string{"D'accord.\n", "**Non** (p. 3)."}, "**Non** (p. 3)."},
+		{[]string{"Okapi : ", "carte spéciale (p. 9)."}, "Okapi : carte spéciale (p. 9)."},
+		{[]string{"Oui (p. 1)."}, "Oui (p. 1)."}, // réponse courte : envoyée au flush final
+		{[]string{"Ok", "."}, "Ok."},             // rien d'autre que la formule : gardée
+	}
+	for _, c := range cases {
+		var out strings.Builder
+		f := &fillerStripper{out: func(s string) { out.WriteString(s) }}
+		for _, chunk := range c.chunks {
+			f.write(chunk)
+		}
+		f.flush()
+		if out.String() != c.want {
+			t.Errorf("%q → %q, attendu %q", c.chunks, out.String(), c.want)
+		}
+	}
+}

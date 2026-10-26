@@ -52,7 +52,8 @@ func TestQuery_StreamsTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("erreur inattendue : %v", err)
 	}
-	if strings.Join(got, "|") != "**Oui**|, p. 4." {
+	// Le début du flux est regroupé par fillerStripper : on vérifie le texte transmis
+	if strings.Join(got, "") != "**Oui**, p. 4." {
 		t.Fatalf("fragments inattendus : %q", got)
 	}
 	if resp.Answer != "**Oui**, p. 4." || resp.Model != "mistral-small" {
