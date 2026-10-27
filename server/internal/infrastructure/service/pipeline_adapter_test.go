@@ -81,6 +81,11 @@ func TestIsHeading(t *testing.T) {
 		{"MISSION", "au maximum 3 cartes", "en main.", false},
 		{"Fin de partie.", "", "Le joueur…", false},
 		{"1. Piocher deux cartes", "", "Puis jouer.", false}, // élément de liste
+		// Relevés sur Les Châteaux de Bourgogne
+		{"Monastères (jaunes) : voir pages 9 à 11", "", "Navires (bleu)", false},
+		{"4 joueurs : 2 boucliers par dépôt", "", "", false},
+		{"H 55h", "", "Animal (vert clair)", false},
+		{"Les tuiles Monastère", "", "Le jeu base inclut 26 tuiles.", true},
 	}
 	for _, c := range cases {
 		if got := isHeading(c.line, c.prev, c.next); got != c.want {

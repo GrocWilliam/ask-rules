@@ -20,8 +20,9 @@ import (
 	"ask-rules-server/internal/infrastructure/config"
 )
 
-// systemPrompt vise un petit modèle (Gemma 3 1B) : consignes courtes et numérotées,
-// format montré par un exemple plutôt que décrit.
+// systemPrompt vise un petit modèle (Gemma 3 1B) : consignes courtes et numérotées.
+// Pas d'exemple de réponse : quand la question le déroute, un petit modèle
+// recopie les exemples mot pour mot (« Le premier joueur à 10 points… »).
 const systemPrompt = `Tu es l'arbitre d'une partie de jeu de société. Les joueurs te posent une question de règle en pleine partie.
 
 Consignes :
@@ -29,30 +30,28 @@ Consignes :
 2. Utilise seulement les extraits qui concernent la question, ignore les autres.
 3. Si la question est courte (« et pour… ? »), elle porte sur le sujet des questions précédentes.
 4. Si les extraits ne donnent pas la réponse, réponds : « Je ne trouve pas cette règle dans le livret. »
-5. Réponds en français, en 80 mots au plus.
+5. Réponds en français, en 80 mots au plus (150 pour une liste).
 6. Commence directement par la règle : jamais « Ok », « D'accord », « Bien sûr » ni reformulation de la question.
 7. « Oui » ou « Non » seulement pour une question fermée (« Peut-on… ? », « Est-ce que… ? »).
 8. Les extraits sont rangés par chapitre. Ne mélange jamais deux chapitres : si la règle diffère selon le chapitre (mode de jeu, extension…), donne-la pour chacun en le nommant.
 
 Format :
-- Première ligne : la réponse directe en gras, avec la page.
+- Première ligne : la réponse directe en gras, avec la page entre parenthèses.
 - Ensuite, seulement si utile : 1 à 3 précisions en liste, chacune avec sa page.
-
-Exemple pour « Comment gagne-t-on ? » :
-**Le premier joueur à 10 points gagne la partie (p. 4).**
-- En cas d'égalité, celui qui a le plus de cartes l'emporte (p. 4).
-
-Exemple pour « Peut-on jouer deux cartes dans le même tour ? » :
-**Non, une seule carte par tour (p. 3).**
-- Exception : la carte « Renfort » permet d'en jouer une seconde (p. 7).`
+- Si la question demande de présenter ou lister (types, phases, actions…) : une ligne de liste par élément, avec sa page.`
 
 // fillerOpening : accusé de réception en tête de réponse (« Ok, », « D'accord. »…),
 // retiré malgré la consigne du prompt qu'un petit modèle ne suit pas toujours.
 var fillerOpening = regexp.MustCompile(`(?i)^\s*(ok|okay|d'accord|d’accord|bien sûr|très bien)\b\s*[,.!:]?\s*`)
 
-// llmMaxTokens : longueur max d'une réponse (~750 mots), largement suffisante
-// pour une règle de jeu. Limite aussi la consommation du quota de tokens.
-const llmMaxTokens = 1024
+// llmMaxTokens : longueur max d'une réponse (~300 mots), le double des 150 mots
+// demandés par le prompt. Coupe aussi vite une réponse qui tourne en boucle.
+const llmMaxTokens = 400
+
+// llmFrequencyPenalty : pénalise les tokens déjà produits, contre les boucles
+// d'un petit modèle (même paragraphe répété jusqu'à max_tokens). Faible pour
+// ne pas gêner les mots normalement répétés (« tuile », « joueur »).
+const llmFrequencyPenalty = 0.3
 
 // chatProvider : une API au format chat/completions (llama.cpp, Mistral…).
 type chatProvider struct {
@@ -278,7 +277,6 @@ func (m *ChatLLMAdapter) ModelName() string {
 		return "none"
 	}
 
-
 	if m.providers[0].model == "" {
 		return m.providers[0].name
 	}
@@ -294,11 +292,12 @@ type chatMessage struct {
 }
 
 type chatRequest struct {
-	Model       string        `json:"model,omitempty"`
-	Messages    []chatMessage `json:"messages"`
-	MaxTokens   int           `json:"max_tokens"`
-	Temperature float64       `json:"temperature"`
-	Stream      bool          `json:"stream,omitempty"`
+	Model            string        `json:"model,omitempty"`
+	Messages         []chatMessage `json:"messages"`
+	MaxTokens        int           `json:"max_tokens"`
+	Temperature      float64       `json:"temperature"`
+	FrequencyPenalty float64       `json:"frequency_penalty"`
+	Stream           bool          `json:"stream,omitempty"`
 }
 
 type chatResponse struct {
@@ -383,11 +382,12 @@ func (m *ChatLLMAdapter) queryChat(ctx context.Context, llmProvider chatProvider
 	}
 
 	body, _ := json.Marshal(chatRequest{
-		Model:       llmProvider.model,
-		Messages:    buildMessages(question, ctxText, history),
-		MaxTokens:   llmMaxTokens,
-		Temperature: 0.3,
-		Stream:      onToken != nil,
+		Model:            llmProvider.model,
+		Messages:         buildMessages(question, ctxText, history),
+		MaxTokens:        llmMaxTokens,
+		Temperature:      0.3,
+		FrequencyPenalty: llmFrequencyPenalty,
+		Stream:           onToken != nil,
 	})
 
 	headers := map[string]string{}
@@ -488,7 +488,6 @@ func readChatStream(provider string, body io.Reader, onToken func(string)) (enti
 			break
 		}
 
-
 		var chunk chatStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return entity.LLMResponse{}, fmt.Errorf("%s: flux invalide : %w", provider, err)
@@ -537,6 +536,6 @@ func readChatStream(provider string, body io.Reader, onToken func(string)) (enti
 	if finishReason == "length" {
 		log.Printf("[WARN] %s - réponse tronquée à %d tokens (id=%s)", provider, llmMaxTokens, id)
 	}
-	
+
 	return entity.LLMResponse{Answer: answer.String(), Model: model, UsedLLM: true, Tokens: tokens}, nil
 }

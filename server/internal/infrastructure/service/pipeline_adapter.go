@@ -599,7 +599,8 @@ func isHeading(line, prev, next string) bool {
 	if !unicode.IsUpper(first) && !unicode.IsDigit(first) {
 		return false
 	}
-	if strings.ContainsRune(".,;:!?", lastNonSpace(line)) {
+	// Deux-points n'importe où : « Mine (gris) : … », « 2 joueurs : 1 bouclier » sont du texte
+	if strings.ContainsRune(".,;!?", lastNonSpace(line)) || strings.ContainsRune(line, ':') || letterCount(line) < 3 {
 		return false
 	}
 	if prev != "" && !isSentenceEnd(lastNonSpace(prev)) {
@@ -613,16 +614,17 @@ func isHeading(line, prev, next string) bool {
 
 // isUpperText : au moins 3 lettres, toutes en majuscules.
 func isUpperText(s string) bool {
-	letters := 0
+	return letterCount(s) >= 3 && strings.ToUpper(s) == s
+}
+
+func letterCount(s string) int {
+	n := 0
 	for _, r := range s {
 		if unicode.IsLetter(r) {
-			if !unicode.IsUpper(r) {
-				return false
-			}
-			letters++
+			n++
 		}
 	}
-	return letters >= 3
+	return n
 }
 
 func mergeOrphanContinuations(paragraphs []paragraph) []paragraph {
