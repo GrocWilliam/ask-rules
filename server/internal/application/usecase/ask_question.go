@@ -234,7 +234,9 @@ func truncateRunes(s string, max int) string {
 // Toutes les questions de l'historique sont ajoutées : la précédente peut être
 // elle-même elliptique, le sujet est alors porté par une plus ancienne.
 func (uc *AskQuestionUseCase) search(ctx context.Context, gameID, question string, history []entity.ChatTurn) ([]*entity.ScoredSection, error) {
-	const limit = 6
+	// 3 sections (la première étendue à ses voisines) : mesuré sur Gemma 3 4B,
+	// réponses plus justes qu'avec 6 et premier mot deux fois plus tôt.
+	const limit = 3
 	own, err := uc.retriever.Search(ctx, &service.SearchRequest{GameID: gameID, Question: question, Limit: limit})
 	if err != nil || len(history) == 0 {
 		return own, err
