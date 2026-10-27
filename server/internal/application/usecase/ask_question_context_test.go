@@ -45,3 +45,21 @@ func TestBuildContextAndMapSections_IncludePages(t *testing.T) {
 		t.Fatalf("section mal convertie : %+v", got)
 	}
 }
+
+func TestBuildContext_GroupsByChapter(t *testing.T) {
+	sec := func(path, title string) *entity.ScoredSection {
+		return &entity.ScoredSection{HierarchyPath: path, Title: title, Text: title + "…"}
+	}
+	sections := []*entity.ScoredSection{
+		sec("MODE SOLO > Combat", "Attaque solo"),
+		sec("MODE MULTIJOUEUR > Combat", "Attaque multi"),
+		sec("MODE SOLO > Combat", "Défense solo"),
+	}
+
+	got := (&AskQuestionUseCase{}).buildContext(sections)
+	want := "Chapitre : MODE SOLO > Combat\n\nSection 1: Attaque solo\nAttaque solo…\n\nSection 2: Défense solo\nDéfense solo…" +
+		"\n\nChapitre : MODE MULTIJOUEUR > Combat\n\nSection 3: Attaque multi\nAttaque multi…"
+	if got != want {
+		t.Fatalf("contexte :\n%s\n\nattendu :\n%s", got, want)
+	}
+}

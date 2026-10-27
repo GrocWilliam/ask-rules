@@ -23,6 +23,11 @@ const (
 	// uniquement vectoriel est écarté. E5 produit des cosinus élevés même pour
 	// des textes sans rapport (~0.7), le seuil ne filtre que le bruit évident.
 	minVectorScore = 0.72
+	// pageDecay : pénalité par page du score fusionné. La règle de référence
+	// est le plus souvent au début du livret, les pages suivantes la détaillent
+	// ou la répètent (exemples, résumé). 0.005 : page 10 ≈ -3 rangs, page 30 ≈ -9.
+	// ponytail: page absolue, ignore la longueur du livret ; à régler avec cmd/eval.
+	pageDecay = 0.005
 )
 
 // SearchOptions paramètres de recherche.
@@ -80,7 +85,44 @@ func Search(ctx context.Context, opts SearchOptions) ([]entity.ScoredSection, er
 	}
 
 	merged := mergeResults(vectorResults, textResults, limit)
-	return merged, nil
+	return expandTop(ctx, opts.SectionRepo, merged), nil
+}
+
+// expandTop complète la meilleure section avec ses voisines du même chapitre :
+// une question générale (« quelles sont les phases ? ») porte sur un chapitre
+// découpé en plusieurs chunks, le meilleur n'en contient qu'une partie.
+// Les voisines déjà présentes dans les résultats en sont retirées.
+func expandTop(ctx context.Context, repo repository.SectionRepository, sections []entity.ScoredSection) []entity.ScoredSection {
+	if len(sections) == 0 || sections[0].HierarchyPath == "" {
+		return sections // sans chapitre connu, les voisines peuvent parler d'autre chose
+	}
+	neighbors, err := repo.Neighbors(ctx, &sections[0])
+	if err != nil {
+		log.Printf("[retriever] Neighbors: %v", err)
+		return sections
+	}
+	if len(neighbors) < 2 {
+		return sections
+	}
+
+	top := sections[0]
+	ids := map[string]bool{}
+	texts := make([]string, len(neighbors))
+	for i, n := range neighbors {
+		ids[n.ID] = true
+		texts[i] = n.Text
+	}
+	top.Text = strings.Join(texts, "\n\n")
+	top.PageStart = neighbors[0].PageStart
+	top.PageEnd = neighbors[len(neighbors)-1].PageEnd
+
+	result := []entity.ScoredSection{top}
+	for _, s := range sections[1:] {
+		if !ids[s.ID] {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 func candidates(limit int) int {
@@ -131,7 +173,7 @@ func mergeResults(vecResults, textResults []entity.ScoredSection, limit int) []e
 	merged := make([]entity.ScoredSection, 0, len(scores))
 	for id, score := range scores {
 		s := sectionMap[id]
-		s.Score = score / maxScore
+		s.Score = score / maxScore * pageFactor(s.PageStart)
 		merged = append(merged, s)
 	}
 
@@ -146,4 +188,12 @@ func mergeResults(vecResults, textResults []entity.ScoredSection, limit int) []e
 		merged = merged[:limit]
 	}
 	return merged
+}
+
+// pageFactor favorise légèrement les premières pages du livret (voir pageDecay).
+func pageFactor(page *int) float64 {
+	if page == nil || *page <= 1 {
+		return 1
+	}
+	return 1 / (1 + pageDecay*float64(*page-1))
 }

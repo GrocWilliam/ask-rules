@@ -175,7 +175,13 @@ func (p *PipelineAdapter) processFileStreaming(
 			continue
 		}
 
-		vec, embErr := p.embedder.EmbedPassage(ctx, cleanText)
+		// Le chapitre fait partie du texte embarqué : une même règle de deux
+		// chapitres (mode solo / multijoueur…) donne deux vecteurs distincts
+		embedText := cleanText
+		if chunk.Heading != "" {
+			embedText = chunk.Heading + "\n" + cleanText
+		}
+		vec, embErr := p.embedder.EmbedPassage(ctx, embedText)
 		if embErr != nil {
 			emit("section_error", map[string]interface{}{"index": i, "error": "embedding: " + embErr.Error()})
 			vec = nil
@@ -198,7 +204,7 @@ func (p *PipelineAdapter) processFileStreaming(
 			PageStart:     intPtr(chunk.PageStart),
 			PageEnd:       intPtr(chunk.PageEnd),
 			SourceFile:    fp,
-			HierarchyPath: sectionType,
+			HierarchyPath: chunk.Heading,
 			ChunkIndex:    i,
 			TotalChunks:   len(chunks),
 		}
@@ -382,6 +388,7 @@ type chunk struct {
 	PageStart int
 	PageEnd   int
 	Position  int
+	Heading   string // chapitre : « COMBAT > Attaque », vide si aucun titre détecté
 }
 
 // paragraph est un paragraphe avec les pages qu'il couvre.
@@ -389,6 +396,7 @@ type paragraph struct {
 	Text      string
 	PageStart int
 	PageEnd   int
+	Heading   bool // titre de chapitre (voir isHeading)
 }
 
 // chunkPages découpe le document page par page : chaque paragraphe garde son
@@ -401,8 +409,9 @@ func chunkPages(pages []pageInfo) []chunk {
 	for _, pg := range pages {
 		text := cleanPDFArtifacts(pg.Text, headers)
 		for _, para := range splitParagraphs(text) {
-			paragraphs = append(paragraphs, paragraph{Text: para, PageStart: pg.Number, PageEnd: pg.Number})
-			totalRunes += utf8.RuneCountInString(para)
+			para.PageStart, para.PageEnd = pg.Number, pg.Number
+			paragraphs = append(paragraphs, para)
+			totalRunes += utf8.RuneCountInString(para.Text)
 		}
 	}
 	if len(paragraphs) == 0 {
@@ -430,6 +439,15 @@ func chunkPages(pages []pageInfo) []chunk {
 	currentLen := 0
 	pageStart, pageEnd := 0, 0
 	position := 0
+	// Chapitre courant : un titre en majuscules ouvre un chapitre (niveau 1),
+	// un titre en casse normale une partie de ce chapitre (niveau 2).
+	var chapter, part string
+	heading := func() string {
+		if chapter != "" && part != "" {
+			return chapter + " > " + part
+		}
+		return chapter + part
+	}
 
 	flush := func() {
 		s := strings.TrimSpace(current.String())
@@ -439,6 +457,7 @@ func chunkPages(pages []pageInfo) []chunk {
 				PageStart: pageStart,
 				PageEnd:   pageEnd,
 				Position:  position,
+				Heading:   heading(),
 			})
 			position++
 		}
@@ -452,6 +471,18 @@ func chunkPages(pages []pageInfo) []chunk {
 			continue
 		}
 		paraLen := utf8.RuneCountInString(text)
+		if para.Heading {
+			// Un chunk ne chevauche pas deux chapitres, sauf s'il est trop
+			// court pour être gardé seul : il rejoint alors le chapitre suivant.
+			if currentLen >= minChunkSize {
+				flush()
+			}
+			if isUpperText(text) {
+				chapter, part = text, ""
+			} else {
+				part = text
+			}
+		}
 		if paraLen > defaultChunkSize*2 {
 			for _, sc := range splitLongParagraph(text, defaultChunkSize) {
 				if isLowQualityText(sc) {
@@ -462,6 +493,7 @@ func chunkPages(pages []pageInfo) []chunk {
 					PageStart: para.PageStart,
 					PageEnd:   para.PageEnd,
 					Position:  position,
+					Heading:   heading(),
 				})
 				position++
 			}
@@ -489,20 +521,38 @@ func chunkPages(pages []pageInfo) []chunk {
 	return chunks
 }
 
-func splitParagraphs(text string) []string {
-	var paragraphs []string
+// splitParagraphs découpe le texte d'une page en paragraphes ; les titres
+// (voir isHeading) forment des paragraphes à part, marqués Heading.
+func splitParagraphs(text string) []paragraph {
+	var paragraphs []paragraph
 	for _, p := range strings.Split(text, "\n\n") {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
-		lines := strings.Split(p, "\n")
+		var lines []string
+		for _, l := range strings.Split(p, "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				lines = append(lines, l)
+			}
+		}
 		var joined []string
-		for _, l := range lines {
-			l = strings.TrimSpace(l)
-			if l == "" {
+		prev := "" // ligne précédente, vide en début de bloc ou après un titre
+		for j, l := range lines {
+			next := ""
+			if j+1 < len(lines) {
+				next = lines[j+1]
+			}
+			if isHeading(l, prev, next) {
+				if len(joined) > 0 {
+					paragraphs = append(paragraphs, paragraph{Text: strings.Join(joined, "\n")})
+					joined = nil
+				}
+				paragraphs = append(paragraphs, paragraph{Text: l, Heading: true})
+				prev = ""
 				continue
 			}
+			prev = l
 			if len(joined) == 0 {
 				joined = append(joined, l)
 				continue
@@ -511,24 +561,68 @@ func splitParagraphs(text string) []string {
 				joined = append(joined, l)
 				continue
 			}
-			prev := joined[len(joined)-1]
-			lastRune := lastNonSpace(prev)
+			last := joined[len(joined)-1]
+			lastRune := lastNonSpace(last)
 			firstRune := firstNonSpace(l)
 			if !isSentenceEnd(lastRune) || (firstRune >= 'a' && firstRune <= 'z') {
-				joined[len(joined)-1] = prev + " " + l
+				joined[len(joined)-1] = last + " " + l
 			} else {
 				joined = append(joined, l)
 			}
 		}
-		paragraphs = append(paragraphs, strings.Join(joined, "\n"))
+		if len(joined) > 0 {
+			paragraphs = append(paragraphs, paragraph{Text: strings.Join(joined, "\n")})
+		}
 	}
 	if len(paragraphs) == 0 {
 		p := strings.TrimSpace(text)
 		if p != "" {
-			paragraphs = []string{p}
+			paragraphs = []paragraph{{Text: p}}
 		}
 	}
 	return paragraphs
+}
+
+// isHeading reconnaît un titre de chapitre dans une ligne du texte extrait :
+// courte, sans ponctuation finale, après une fin de phrase et avant une ligne
+// qui ne continue pas la phrase. Elle doit en plus être en majuscules, ou
+// ouvrir un bloc (prev vide : ligne vide ou titre avant) : une ligne en casse normale au milieu
+// d'un bloc est le plus souvent une ligne de colonne étroite.
+// ponytail: heuristique sur le texte brut de pdftotext ; si les livrets
+// trompent la détection, lire la taille de police (pdftotext -bbox-layout).
+func isHeading(line, prev, next string) bool {
+	runes := []rune(line)
+	if len(runes) < 3 || len(runes) > 60 || isListMarker(line) && !isUpperText(line) {
+		return false
+	}
+	first := runes[0]
+	if !unicode.IsUpper(first) && !unicode.IsDigit(first) {
+		return false
+	}
+	if strings.ContainsRune(".,;:!?", lastNonSpace(line)) {
+		return false
+	}
+	if prev != "" && !isSentenceEnd(lastNonSpace(prev)) {
+		return false
+	}
+	if next != "" && unicode.IsLower(firstNonSpace(next)) {
+		return false
+	}
+	return prev == "" || isUpperText(line)
+}
+
+// isUpperText : au moins 3 lettres, toutes en majuscules.
+func isUpperText(s string) bool {
+	letters := 0
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			if !unicode.IsUpper(r) {
+				return false
+			}
+			letters++
+		}
+	}
+	return letters >= 3
 }
 
 func mergeOrphanContinuations(paragraphs []paragraph) []paragraph {
@@ -547,7 +641,7 @@ func mergeOrphanContinuations(paragraphs []paragraph) []paragraph {
 
 		startsLower := first >= 'a' && first <= 'z'
 		prevEndsOpen := !isSentenceEnd(prevLast)
-		if startsLower && prevEndsOpen {
+		if startsLower && prevEndsOpen && !prev.Heading && !p.Heading {
 			prev.Text += " " + p.Text
 			prev.PageEnd = p.PageEnd
 			continue
@@ -564,7 +658,7 @@ func mergeParagraphs(paragraphs []paragraph, minSize int) []paragraph {
 	var result []paragraph
 	acc := paragraphs[0]
 	for _, p := range paragraphs[1:] {
-		if utf8.RuneCountInString(acc.Text) < minSize {
+		if utf8.RuneCountInString(acc.Text) < minSize && !acc.Heading && !p.Heading {
 			acc.Text += " " + p.Text
 			acc.PageEnd = p.PageEnd
 		} else {

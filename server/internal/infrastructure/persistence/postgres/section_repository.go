@@ -7,6 +7,7 @@ import (
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/repository"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 )
@@ -70,11 +71,14 @@ func (r *SectionRepositoryImpl) DeleteByGameID(ctx context.Context, gameID strin
 	return err
 }
 
+// scoredColumns : colonnes lues par scanScored, suivies du score.
+const scoredColumns = `id, game_id, titre, type_section, contenu, resume,
+		       page_debut, page_fin, fichier_source, hierarchy_path, chunk_index`
+
 // VectorSearch effectue une recherche sémantique par embedding.
 func (r *SectionRepositoryImpl) VectorSearch(ctx context.Context, gameID string, embedding []float64, limit int) ([]*entity.ScoredSection, error) {
 	query := `
-		SELECT id, game_id, titre, type_section, contenu, resume, 
-		       page_debut, page_fin, fichier_source,
+		SELECT ` + scoredColumns + `,
 		       1 - (embedding <=> $1) AS score
 		FROM sections
 		WHERE game_id = $2
@@ -89,43 +93,13 @@ func (r *SectionRepositoryImpl) VectorSearch(ctx context.Context, gameID string,
 	}
 	vec := pgvector.NewVector(vecData)
 
-	rows, err := r.pool.Query(ctx, query, vec, gameID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var sections []*entity.ScoredSection
-	for rows.Next() {
-		var sec entity.ScoredSection
-
-		err := rows.Scan(
-			&sec.ID,
-			&sec.GameID,
-			&sec.Title,
-			&sec.SectionType,
-			&sec.Text,
-			&sec.Summary,
-			&sec.PageStart,
-			&sec.PageEnd,
-			&sec.SourceFile,
-			&sec.Score,
-		)
-		if err != nil {
-			return nil, err
-		}
-
-		sections = append(sections, &sec)
-	}
-
-	return sections, rows.Err()
+	return scanScored(r.pool.Query(ctx, query, vec, gameID, limit))
 }
 
 // FullTextSearch effectue une recherche full-text (PostgreSQL tsvector).
 func (r *SectionRepositoryImpl) FullTextSearch(ctx context.Context, gameID string, query string, limit int) ([]*entity.ScoredSection, error) {
 	sqlQuery := `
-		SELECT id, game_id, titre, type_section, contenu, resume,
-		       page_debut, page_fin, fichier_source,
+		SELECT ` + scoredColumns + `,
 		       ts_rank(search_vector, websearch_to_tsquery('french', $1)) AS score
 		FROM sections
 		WHERE game_id = $2
@@ -134,7 +108,25 @@ func (r *SectionRepositoryImpl) FullTextSearch(ctx context.Context, gameID strin
 		LIMIT $3
 	`
 
-	rows, err := r.pool.Query(ctx, sqlQuery, query, gameID, limit)
+	return scanScored(r.pool.Query(ctx, sqlQuery, query, gameID, limit))
+}
+
+// Neighbors retourne la section et ses voisines (chunk_index ± 1) du même
+// fichier et du même chapitre, dans l'ordre du livret.
+func (r *SectionRepositoryImpl) Neighbors(ctx context.Context, sec *entity.ScoredSection) ([]*entity.ScoredSection, error) {
+	query := `
+		SELECT ` + scoredColumns + `, 0::float8 AS score
+		FROM sections
+		WHERE game_id = $1 AND fichier_source = $2 AND hierarchy_path = $3
+		  AND chunk_index BETWEEN $4::int - 1 AND $4::int + 1
+		ORDER BY chunk_index
+	`
+
+	return scanScored(r.pool.Query(ctx, query, sec.GameID, sec.SourceFile, sec.HierarchyPath, sec.ChunkIndex))
+}
+
+// scanScored lit les lignes SELECT scoredColumns, score.
+func scanScored(rows pgx.Rows, err error) ([]*entity.ScoredSection, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +146,8 @@ func (r *SectionRepositoryImpl) FullTextSearch(ctx context.Context, gameID strin
 			&sec.PageStart,
 			&sec.PageEnd,
 			&sec.SourceFile,
+			&sec.HierarchyPath,
+			&sec.ChunkIndex,
 			&sec.Score,
 		)
 		if err != nil {

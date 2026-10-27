@@ -97,6 +97,10 @@ func (m *mockSectionRepo) FullTextSearch(ctx context.Context, gameID, query stri
 	return []*entity.ScoredSection{}, nil
 }
 
+func (m *mockSectionRepo) Neighbors(ctx context.Context, sec *entity.ScoredSection) ([]*entity.ScoredSection, error) {
+	return []*entity.ScoredSection{sec}, nil
+}
+
 // Mock RetrieverService
 type mockRetriever struct {
 	searchFunc func(ctx context.Context, req *service.SearchRequest) ([]*entity.ScoredSection, error)

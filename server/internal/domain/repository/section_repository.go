@@ -22,4 +22,8 @@ type SectionRepository interface {
 	// FullTextSearch effectue une recherche full-text (PostgreSQL tsvector).
 	// Retourne les sections correspondantes triées par pertinence.
 	FullTextSearch(ctx context.Context, gameID string, query string, limit int) ([]*entity.ScoredSection, error)
+
+	// Neighbors retourne la section et ses voisines immédiates (chunk_index ± 1)
+	// du même fichier et du même chapitre, dans l'ordre du livret.
+	Neighbors(ctx context.Context, sec *entity.ScoredSection) ([]*entity.ScoredSection, error)
 }

@@ -23,15 +23,18 @@ type Section struct {
 // ScoredSection est une section avec un score de pertinence.
 // Utilisée pour les résultats de recherche (vectorielle ou full-text).
 type ScoredSection struct {
-	ID          string                 `json:"id"`
-	GameID      string                 `json:"game_id"`
-	Title       string                 `json:"title"`
-	SectionType string                 `json:"section_type"`
-	Text        string                 `json:"text"`
-	Summary     string                 `json:"summary"`
-	PageStart   *int                   `json:"page_start,omitempty"`
-	PageEnd     *int                   `json:"page_end,omitempty"`
-	SourceFile  string                 `json:"source_file"`
-	Score       float64                `json:"score"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+	ID          string `json:"id"`
+	GameID      string `json:"game_id"`
+	Title       string `json:"title"`
+	SectionType string `json:"section_type"`
+	Text        string `json:"text"`
+	Summary     string `json:"summary"`
+	PageStart   *int   `json:"page_start,omitempty"`
+	PageEnd     *int   `json:"page_end,omitempty"`
+	SourceFile  string `json:"source_file"`
+	// HierarchyPath : chapitre du livret (« COMBAT > Attaque »), vide si inconnu.
+	HierarchyPath string                 `json:"hierarchy_path,omitempty"`
+	ChunkIndex    int                    `json:"chunk_index"`
+	Score         float64                `json:"score"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }

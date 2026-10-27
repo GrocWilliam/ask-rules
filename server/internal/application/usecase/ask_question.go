@@ -278,18 +278,40 @@ func (uc *AskQuestionUseCase) buildCacheKey(gameID, question string) string {
 }
 
 // buildContext construit le texte de contexte pour le LLM.
-// Chaque section indique sa page pour que le LLM puisse la citer.
+// Chaque section indique sa page pour que le LLM puisse la citer. Les sections
+// sont regroupées par chapitre, annoncé en tête de groupe : une même règle
+// peut exister dans deux chapitres (mode solo / multijoueur…), le LLM doit
+// voir qu'il s'agit de deux contextes distincts.
 func (uc *AskQuestionUseCase) buildContext(sections []*entity.ScoredSection) string {
+	var order []string
+	groups := map[string][]*entity.ScoredSection{}
+	for _, sec := range sections {
+		if _, ok := groups[sec.HierarchyPath]; !ok {
+			order = append(order, sec.HierarchyPath)
+		}
+		groups[sec.HierarchyPath] = append(groups[sec.HierarchyPath], sec)
+	}
+
 	var builder strings.Builder
-	for i, sec := range sections {
-		if i > 0 {
-			builder.WriteString("\n\n")
+	i := 0
+	for _, path := range order {
+		if path != "" {
+			if builder.Len() > 0 {
+				builder.WriteString("\n\n")
+			}
+			builder.WriteString("Chapitre : " + path)
 		}
-		builder.WriteString(fmt.Sprintf("Section %d: %s", i+1, sec.Title))
-		if ref := pageRef(sec.PageStart, sec.PageEnd); ref != "" {
-			builder.WriteString(" (" + ref + ")")
+		for _, sec := range groups[path] {
+			if builder.Len() > 0 {
+				builder.WriteString("\n\n")
+			}
+			i++
+			builder.WriteString(fmt.Sprintf("Section %d: %s", i, sec.Title))
+			if ref := pageRef(sec.PageStart, sec.PageEnd); ref != "" {
+				builder.WriteString(" (" + ref + ")")
+			}
+			builder.WriteString("\n" + sec.Text)
 		}
-		builder.WriteString("\n" + sec.Text)
 	}
 	return builder.String()
 }

@@ -32,6 +32,7 @@ Consignes :
 5. Réponds en français, en 80 mots au plus.
 6. Commence directement par la règle : jamais « Ok », « D'accord », « Bien sûr » ni reformulation de la question.
 7. « Oui » ou « Non » seulement pour une question fermée (« Peut-on… ? », « Est-ce que… ? »).
+8. Les extraits sont rangés par chapitre. Ne mélange jamais deux chapitres : si la règle diffère selon le chapitre (mode de jeu, extension…), donne-la pour chacun en le nommant.
 
 Format :
 - Première ligne : la réponse directe en gras, avec la page.
@@ -196,9 +197,9 @@ func (f *fillerStripper) flush() {
 // Warmup réveille en arrière-plan les fournisseurs mis en veille, pour qu'ils
 // soient prêts quand l'utilisateur posera sa question.
 func (m *ChatLLMAdapter) Warmup() {
-	for _, p := range m.providers {
-		if p.health != nil {
-			go p.health.ready(context.Background())
+	for _, provider := range m.providers {
+		if provider.health != nil {
+			go provider.health.ready(context.Background())
 		}
 	}
 }
@@ -217,13 +218,16 @@ func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxTex
 			forward(text)
 		}
 	}
+
 	var errs []string
 	for i, llmProvider := range m.providers {
 		isLast := i == len(m.providers)-1
 		retries := llmMaxRetries
+
 		if !isLast {
 			retries = 0
 		}
+
 		if llmProvider.health != nil {
 			if isLast {
 				// Pas d'autre fournisseur : attendre le réveil (dans la limite de la requête)
@@ -236,6 +240,7 @@ func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxTex
 				continue
 			}
 		}
+
 		resp, err := m.queryChat(ctx, llmProvider, retries, question, ctxText, history, onToken)
 		if llmProvider.health != nil {
 			if err == nil {
@@ -244,12 +249,14 @@ func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxTex
 				llmProvider.health.markDown()
 			}
 		}
+
 		if err == nil {
 			if i > 0 {
 				log.Printf("[INFO] LLM - réponse fournie par %s (secours)", llmProvider.name)
 			}
 			return resp, nil
 		}
+
 		// Client parti, délai de la requête dépassé ou réponse déjà entamée :
 		// inutile d'essayer le suivant
 		if ctx.Err() != nil || isLast || streamed {
@@ -258,6 +265,7 @@ func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxTex
 			}
 			return entity.LLMResponse{}, err
 		}
+
 		log.Printf("[WARN] LLM - %s indisponible, bascule sur %s : %v", llmProvider.name, m.providers[i+1].name, err)
 		errs = append(errs, err.Error())
 	}
@@ -269,9 +277,12 @@ func (m *ChatLLMAdapter) ModelName() string {
 	if len(m.providers) == 0 {
 		return "none"
 	}
+
+
 	if m.providers[0].model == "" {
 		return m.providers[0].name
 	}
+
 	return m.providers[0].model
 }
 
@@ -325,6 +336,7 @@ func buildMessages(question, ctxText string, history []entity.ChatTurn) []chatMe
 		}
 		fmt.Fprintf(&b, "Dernière réponse donnée : %s\n\n", history[len(history)-1].Answer)
 	}
+
 	b.WriteString("Question : " + question)
 	return []chatMessage{
 		{Role: "system", Content: systemPrompt},
@@ -339,10 +351,12 @@ func chatContentText(raw json.RawMessage) (string, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return "", nil
 	}
+
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
 		return text, nil
 	}
+
 	var chunks []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
@@ -350,12 +364,14 @@ func chatContentText(raw json.RawMessage) (string, error) {
 	if err := json.Unmarshal(raw, &chunks); err != nil {
 		return "", fmt.Errorf("contenu de réponse inattendu : %w", err)
 	}
+
 	var b strings.Builder
 	for _, c := range chunks {
 		if c.Type == "text" {
 			b.WriteString(c.Text)
 		}
 	}
+
 	return b.String(), nil
 }
 
@@ -365,6 +381,7 @@ func (m *ChatLLMAdapter) queryChat(ctx context.Context, llmProvider chatProvider
 		ctx, cancel = context.WithTimeout(ctx, llmProvider.timeout)
 		defer cancel()
 	}
+
 	body, _ := json.Marshal(chatRequest{
 		Model:       llmProvider.model,
 		Messages:    buildMessages(question, ctxText, history),
@@ -377,10 +394,12 @@ func (m *ChatLLMAdapter) queryChat(ctx context.Context, llmProvider chatProvider
 	if llmProvider.apiKey != "" {
 		headers["Authorization"] = "Bearer " + llmProvider.apiKey
 	}
+
 	resp, err := postJSONWithRetry(ctx, m.client, llmProvider.pacer, llmProvider.name, llmProvider.url, headers, body, maxRetries)
 	if err != nil {
 		return entity.LLMResponse{}, err
 	}
+
 	defer resp.Body.Close()
 
 	if onToken != nil {
@@ -391,17 +410,22 @@ func (m *ChatLLMAdapter) queryChat(ctx context.Context, llmProvider chatProvider
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return entity.LLMResponse{}, fmt.Errorf("%s: %w", llmProvider.name, err)
 	}
+
 	if len(result.Choices) == 0 {
 		return entity.LLMResponse{}, fmt.Errorf("%s: pas de réponse", llmProvider.name)
 	}
+
 	choice := result.Choices[0]
 	answer, err := chatContentText(choice.Message.Content)
+
 	if err != nil {
 		return entity.LLMResponse{}, fmt.Errorf("%s: %w", llmProvider.name, err)
 	}
+
 	if strings.TrimSpace(answer) == "" {
 		return entity.LLMResponse{}, fmt.Errorf("%s: réponse vide (finish_reason=%s)", llmProvider.name, choice.FinishReason)
 	}
+
 	if choice.FinishReason == "length" {
 		log.Printf("[WARN] %s - réponse tronquée à %d tokens (id=%s)", llmProvider.name, llmMaxTokens, result.ID)
 	}
@@ -448,28 +472,36 @@ func readChatStream(provider string, body io.Reader, onToken func(string)) (enti
 		finishReason string
 		tokens       *entity.TokenUsage
 	)
+
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		data, ok := strings.CutPrefix(line, "data:")
 		if !ok {
 			continue // lignes vides, commentaires « : keep-alive », event:…
 		}
+
 		data = strings.TrimSpace(data)
 		if data == "[DONE]" {
 			break
 		}
+
+
 		var chunk chatStreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			return entity.LLMResponse{}, fmt.Errorf("%s: flux invalide : %w", provider, err)
 		}
+
 		if chunk.Model != "" {
 			model = chunk.Model
 		}
+
 		if chunk.ID != "" {
 			id = chunk.ID
 		}
+
 		if chunk.Usage != nil {
 			tokens = &entity.TokenUsage{
 				Prompt:     chunk.Usage.PromptTokens,
@@ -482,23 +514,29 @@ func readChatStream(provider string, body io.Reader, onToken func(string)) (enti
 			if err != nil {
 				return entity.LLMResponse{}, fmt.Errorf("%s: %w", provider, err)
 			}
+
 			if text != "" {
 				answer.WriteString(text)
 				onToken(text)
 			}
+
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				finishReason = *choice.FinishReason
 			}
 		}
 	}
+
 	if err := scanner.Err(); err != nil {
 		return entity.LLMResponse{}, fmt.Errorf("%s: flux interrompu : %w", provider, err)
 	}
+
 	if strings.TrimSpace(answer.String()) == "" {
 		return entity.LLMResponse{}, fmt.Errorf("%s: réponse vide (finish_reason=%s)", provider, finishReason)
 	}
+
 	if finishReason == "length" {
 		log.Printf("[WARN] %s - réponse tronquée à %d tokens (id=%s)", provider, llmMaxTokens, id)
 	}
+	
 	return entity.LLMResponse{Answer: answer.String(), Model: model, UsedLLM: true, Tokens: tokens}, nil
 }
