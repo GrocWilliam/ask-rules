@@ -12,7 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -241,7 +241,8 @@ func (e *ONNXEmbedderAdapter) Release() {
 
 	e.initialized = false
 	log.Printf("[INFO] ONNXEmbedder - Modèle libéré de la RAM")
-	runtime.GC()
+	debug.FreeOSMemory() // GC + rend le tas Go au système
+	trimNativeHeap()     // idem pour la mémoire native d'ONNX Runtime
 }
 
 // Embed génère le vecteur (dimension 384) d'une requête utilisateur.

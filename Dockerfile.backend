@@ -51,12 +51,16 @@ COPY scripts/ensure-model.sh /app/scripts/ensure-model.sh
 RUN chmod +x /app/scripts/download-model.sh /app/scripts/ensure-model.sh \
     && mkdir -p uploads models
 
+# MALLOC_ARENA_MAX : glibc crée jusqu'à 8 arènes malloc par cœur ; ONNX Runtime
+# alloue depuis de nombreux threads et la mémoire libérée y reste bloquée
+# (RSS qui ne baisse pas après les imports)
 ENV ENV=production \
     PORT=8080 \
     MODEL_PATH=/app/models/multilingual-e5-small \
     MODEL_AUTO_DOWNLOAD=true \
     UPLOADS_DIR=/app/uploads \
-    LD_LIBRARY_PATH=/usr/local/lib
+    LD_LIBRARY_PATH=/usr/local/lib \
+    MALLOC_ARENA_MAX=2
 
 EXPOSE 8080
 
