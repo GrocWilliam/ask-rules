@@ -36,7 +36,7 @@ type LLM interface {
 	Query(ctx context.Context, question, contextText string, history []llm.ChatTurn, onToken func(string)) (*llm.Response, error)
 }
 
-// Cache garde les réponses aux premières questions (Redis ou mémoire).
+// Cache garde les réponses aux premières questions.
 // Get retourne nil si la clé est absente ou expirée.
 type Cache interface {
 	Get(ctx context.Context, key string) (interface{}, error)

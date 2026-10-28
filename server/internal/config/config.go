@@ -27,10 +27,6 @@ type Config struct {
 	// AskRateLimitPerMinute : questions max par minute et par IP (0 = illimité)
 	AskRateLimitPerMinute int
 
-	// Redis
-	RedisEnabled bool
-	RedisURL     string
-
 	// Stockage
 	UploadsDir string
 
@@ -78,8 +74,6 @@ func Load() error {
 		LLM:                   loadLLMProvider("LLM_"),
 		AdminPassword:         getEnv("ADMIN_PASSWORD", ""),
 		AskRateLimitPerMinute: getEnvIntAllowZero("ASK_RATE_LIMIT_PER_MINUTE", 10),
-		RedisEnabled:          getEnvBool("REDIS_ENABLED", false),
-		RedisURL:              getEnv("REDIS_URL", "redis://localhost:6379"),
 		UploadsDir:            getEnv("UPLOADS_DIR", "../uploads"),
 		ModelPath:             getEnv("MODEL_PATH", "../models/multilingual-e5-small"),
 		OnnxThreads:           getEnvInt("ONNX_THREADS", 2),
@@ -116,18 +110,6 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func getEnvBool(key string, fallback bool) bool {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
-	}
-	b, err := strconv.ParseBool(v)
-	if err != nil {
-		return fallback
-	}
-	return b
 }
 
 func getEnvInt(key string, fallback int) int {

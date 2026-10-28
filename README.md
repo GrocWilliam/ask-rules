@@ -2,7 +2,7 @@
 
 Assistant IA pour interroger des règles de jeux de société en français.
 
-**Stack** : Go 1.22 · SvelteKit (SPA) · PostgreSQL + pgvector · ONNX Runtime · Redis (optionnel)
+**Stack** : Go 1.22 · SvelteKit (SPA) · PostgreSQL + pgvector · ONNX Runtime
 
 ---
 
@@ -20,7 +20,7 @@ server/
     ├── files/           # Fichiers uploadés (UPLOADS_DIR)
     ├── embed/           # Embeddings ONNX (multilingual-e5-small)
     ├── llm/             # Client chat/completions : retry, cadence, réveil d'un LLM en veille
-    ├── cache/           # Cache des réponses (Redis, sinon mémoire)
+    ├── cache/           # Cache des réponses en mémoire
     ├── nlp/             # Mots-clés, type de section, mécaniques, gameplay
     ├── search/          # Recherche hybride (vectorielle + plein texte, fusion RRF)
     ├── ask/             # Question → recherche → contexte → LLM → cache
@@ -47,7 +47,6 @@ Les dépendances vont dans un seul sens : `web` → `ask`, `index` → `search`,
 - **Node.js 18+ + pnpm**
 - **PostgreSQL 14+** avec l'extension `pgvector`
 - **libonnxruntime.so 1.20.0** (voir ci-dessous)
-- Redis (optionnel)
 
 ### Installer libonnxruntime
 
@@ -130,8 +129,6 @@ Côté serveur, [Mage](https://magefile.org) regroupe les tâches Go (`go instal
 | `LLM_WAKE_TIMEOUT_SECONDS`  | `300`                                                     | Durée max du réveil (et de l'attente d'une question)                                                                                                                 |
 | `ADMIN_PASSWORD`            | —                                                         | Mot de passe interface admin (sans valeur, l’admin est désactivé)                                                                                                    |
 | `ASK_RATE_LIMIT_PER_MINUTE` | `10`                                                      | Questions max par minute et par IP sur `/api/ask` et `/api/ask/stream` (`0` = illimité). Au-delà : HTTP 429 avec `Retry-After`                                       |
-| `REDIS_ENABLED`             | `false`                                                   | Activer le cache Redis                                                                                                                                               |
-| `REDIS_URL`                 | `redis://localhost:6379`                                  | URL Redis                                                                                                                                                            |
 | `UPLOADS_DIR`               | `../uploads`                                              | Répertoire des fichiers uploadés                                                                                                                                     |
 | `MODEL_PATH`                | `../models/multilingual-e5-small`                         | Chemin du modèle ONNX                                                                                                                                                |
 | `MODEL_QUANTIZED`           | `true`                                                    | Télécharger le modèle int8 (118 Mo) au lieu du fp32 (470 Mo)                                                                                                         |
