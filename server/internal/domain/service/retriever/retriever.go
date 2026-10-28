@@ -88,41 +88,57 @@ func Search(ctx context.Context, opts SearchOptions) ([]entity.ScoredSection, er
 	return expandTop(ctx, opts.SectionRepo, merged), nil
 }
 
-// expandTop complète la meilleure section avec ses voisines du même chapitre :
-// une question générale (« quelles sont les phases ? ») porte sur un chapitre
-// découpé en plusieurs chunks, le meilleur n'en contient qu'une partie.
-// Les voisines déjà présentes dans les résultats en sont retirées.
+// expandTopN : nombre de meilleures sections complétées par leurs voisines.
+const expandTopN = 2
+
+// expandTop complète les expandTopN meilleures sections avec leurs voisines du
+// même chapitre : une réponse (« quelles sont les phases ? », les deux effets
+// d'une tuile) s'étale souvent sur plusieurs chunks, le meilleur n'en contient
+// qu'une partie. Un chunk n'apparaît qu'une fois : les voisines déjà utilisées
+// ou déjà présentes dans les résultats en sont retirées.
 func expandTop(ctx context.Context, repo repository.SectionRepository, sections []entity.ScoredSection) []entity.ScoredSection {
-	if len(sections) == 0 || sections[0].HierarchyPath == "" {
-		return sections // sans chapitre connu, les voisines peuvent parler d'autre chose
-	}
-	neighbors, err := repo.Neighbors(ctx, &sections[0])
-	if err != nil {
-		log.Printf("[retriever] Neighbors: %v", err)
-		return sections
-	}
-	if len(neighbors) < 2 {
-		return sections
-	}
-
-	top := sections[0]
-	ids := map[string]bool{}
-	texts := make([]string, len(neighbors))
-	for i, n := range neighbors {
-		ids[n.ID] = true
-		texts[i] = n.Text
-	}
-	top.Text = strings.Join(texts, "\n\n")
-	top.PageStart = neighbors[0].PageStart
-	top.PageEnd = neighbors[len(neighbors)-1].PageEnd
-
-	result := []entity.ScoredSection{top}
-	for _, s := range sections[1:] {
-		if !ids[s.ID] {
-			result = append(result, s)
+	used := map[string]bool{}
+	var result []entity.ScoredSection
+	for _, s := range sections {
+		if used[s.ID] {
+			continue // déjà inclus comme voisine d'une section mieux classée
 		}
+		used[s.ID] = true
+		if len(result) < expandTopN {
+			s = expand(ctx, repo, s, used)
+		}
+		result = append(result, s)
 	}
 	return result
+}
+
+// expand ajoute à s ses voisines non encore utilisées, dans l'ordre du livret.
+func expand(ctx context.Context, repo repository.SectionRepository, s entity.ScoredSection, used map[string]bool) entity.ScoredSection {
+	if s.HierarchyPath == "" {
+		return s // sans chapitre connu, les voisines peuvent parler d'autre chose
+	}
+	neighbors, err := repo.Neighbors(ctx, &s)
+	if err != nil {
+		log.Printf("[retriever] Neighbors: %v", err)
+		return s
+	}
+
+	var texts []string
+	for _, n := range neighbors {
+		if n.ID != s.ID && used[n.ID] {
+			continue
+		}
+		used[n.ID] = true
+		texts = append(texts, n.Text)
+		if len(texts) == 1 {
+			s.PageStart = n.PageStart
+		}
+		s.PageEnd = n.PageEnd
+	}
+	if len(texts) > 0 {
+		s.Text = strings.Join(texts, "\n\n")
+	}
+	return s
 }
 
 func candidates(limit int) int {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"unicode/utf8"
 
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/repository"
@@ -144,6 +145,8 @@ func (uc *AskQuestionUseCase) ExecuteStream(ctx context.Context, req *AskRequest
 		log.Printf("[WARN] AskQuestion - No sections found for game '%s' with question: %s", game.Name, req.Question)
 		return nil, entity.ErrNoSectionsFound
 	}
+	// Les sources affichées au joueur sont celles que le LLM a reçues
+	sections = fitContextBudget(sections)
 
 	// 5. Construire le contexte pour le LLM
 	contextText := uc.buildContext(sections)
@@ -234,9 +237,8 @@ func truncateRunes(s string, max int) string {
 // Toutes les questions de l'historique sont ajoutées : la précédente peut être
 // elle-même elliptique, le sujet est alors porté par une plus ancienne.
 func (uc *AskQuestionUseCase) search(ctx context.Context, gameID, question string, history []entity.ChatTurn) ([]*entity.ScoredSection, error) {
-	// 3 sections (la première étendue à ses voisines) : mesuré sur Gemma 3 4B,
-	// réponses plus justes qu'avec 6 et premier mot deux fois plus tôt.
-	const limit = 3
+	// Candidats : fitContextBudget garde ensuite ce qui tient dans le budget
+	const limit = 6
 	own, err := uc.retriever.Search(ctx, &service.SearchRequest{GameID: gameID, Question: question, Limit: limit})
 	if err != nil || len(history) == 0 {
 		return own, err
@@ -255,6 +257,29 @@ func (uc *AskQuestionUseCase) search(ctx context.Context, gameID, question strin
 		return nil, err
 	}
 	return interleave(own, enriched, limit), nil
+}
+
+// maxContextRunes : taille max des extraits envoyés au LLM (~1 300 tokens).
+// C'est la taille, pas le nombre de sections, qui fixe la latence : mesuré sur
+// Gemma 3 4B (CPU), ~3 300 caractères → premier mot en 4,5-8 s, ~5 800 → 9-15 s.
+// 4 500 laisse passer les 2 sections étendues (jusqu'à ~2 100 chacune).
+const maxContextRunes = 4500
+
+// fitContextBudget garde les sections, dans l'ordre de pertinence, tant
+// qu'elles tiennent dans maxContextRunes. Une section trop longue est sautée
+// au profit des suivantes, plus courtes ; la première est toujours gardée.
+func fitContextBudget(sections []*entity.ScoredSection) []*entity.ScoredSection {
+	var kept []*entity.ScoredSection
+	used := 0
+	for _, s := range sections {
+		n := utf8.RuneCountInString(s.Text)
+		if len(kept) > 0 && used+n > maxContextRunes {
+			continue
+		}
+		kept = append(kept, s)
+		used += n
+	}
+	return kept
 }
 
 // interleave alterne les résultats de a et b, sans doublon, jusqu'à limit.

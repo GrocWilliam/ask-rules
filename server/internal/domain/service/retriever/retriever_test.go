@@ -2,6 +2,7 @@ package retriever
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"ask-rules-server/internal/domain/entity"
@@ -82,36 +83,54 @@ func TestMergeResults_EarlierPageWinsCloseRanks(t *testing.T) {
 	}
 }
 
-// neighborRepo renvoie toujours les mêmes voisines.
-type neighborRepo struct {
+// chapterRepo : un chapitre de chunks consécutifs ; Neighbors renvoie le
+// chunk et ses voisins immédiats, comme la requête SQL.
+type chapterRepo struct {
 	repository.SectionRepository
-	neighbors []*entity.ScoredSection
+	chunks []entity.ScoredSection
 }
 
-func (r neighborRepo) Neighbors(ctx context.Context, s *entity.ScoredSection) ([]*entity.ScoredSection, error) {
-	return r.neighbors, nil
+func (r chapterRepo) Neighbors(ctx context.Context, s *entity.ScoredSection) ([]*entity.ScoredSection, error) {
+	var out []*entity.ScoredSection
+	for i := range r.chunks {
+		if d := r.chunks[i].ChunkIndex - s.ChunkIndex; d >= -1 && d <= 1 {
+			out = append(out, &r.chunks[i])
+		}
+	}
+	return out, nil
 }
 
 func TestExpandTop_MergesChapterNeighbors(t *testing.T) {
 	p := func(v int) *int { return &v }
-	chunk := func(id, text string, page int) *entity.ScoredSection {
-		s := sec(id, 0)
-		s.Text, s.PageStart, s.PageEnd, s.HierarchyPath = text, p(page), p(page), "TOUR DE JEU"
-		return &s
+	chunk := func(i int) entity.ScoredSection {
+		s := sec(fmt.Sprint("c", i), 0)
+		s.Text, s.PageStart, s.PageEnd, s.HierarchyPath, s.ChunkIndex = fmt.Sprint("Phase ", i), p(i), p(i), "TOUR DE JEU", i
+		return s
 	}
-	prev, top, next := chunk("prev", "Phase 1", 4), chunk("top", "Phase 2", 5), chunk("next", "Phase 3", 6)
-	repo := neighborRepo{neighbors: []*entity.ScoredSection{prev, top, next}}
+	repo := chapterRepo{}
+	for i := 1; i <= 5; i++ {
+		repo.chunks = append(repo.chunks, chunk(i))
+	}
+	other := sec("other", 0)
+	other.Text = "Combat"
 
-	got := expandTop(context.Background(), repo, []entity.ScoredSection{*top, *next, *chunk("other", "Combat", 9)})
-	if len(got) != 2 || got[1].ID != "other" {
-		t.Fatalf("la voisine déjà présente doit être retirée : %+v", got)
+	// c2 absorbe c1 et c3 ; c3, déjà utilisé, disparaît ; c5 est la 2e section
+	// étendue, avec c4 seulement ; other (3e) n'est pas étendue
+	got := expandTop(context.Background(), repo, []entity.ScoredSection{chunk(2), chunk(3), chunk(5), other})
+	var texts []string
+	for _, s := range got {
+		texts = append(texts, s.Text)
 	}
-	if got[0].Text != "Phase 1\n\nPhase 2\n\nPhase 3" || *got[0].PageStart != 4 || *got[0].PageEnd != 6 {
-		t.Fatalf("section mal complétée : %q p.%d-%d", got[0].Text, *got[0].PageStart, *got[0].PageEnd)
+	want := []string{"Phase 1\n\nPhase 2\n\nPhase 3", "Phase 4\n\nPhase 5", "Combat"}
+	if fmt.Sprint(texts) != fmt.Sprint(want) {
+		t.Fatalf("sections : %q, attendu %q", texts, want)
+	}
+	if *got[0].PageStart != 1 || *got[0].PageEnd != 3 {
+		t.Fatalf("pages de la 1re section : p.%d-%d, attendu p.1-3", *got[0].PageStart, *got[0].PageEnd)
 	}
 
 	// Sans chapitre connu, pas d'extension
-	noPath := *top
+	noPath := chunk(2)
 	noPath.HierarchyPath = ""
 	if got := expandTop(context.Background(), repo, []entity.ScoredSection{noPath}); got[0].Text != "Phase 2" {
 		t.Fatalf("section sans chapitre étendue : %q", got[0].Text)

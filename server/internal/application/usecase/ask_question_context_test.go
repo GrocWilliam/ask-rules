@@ -63,3 +63,27 @@ func TestBuildContext_GroupsByChapter(t *testing.T) {
 		t.Fatalf("contexte :\n%s\n\nattendu :\n%s", got, want)
 	}
 }
+
+func TestFitContextBudget(t *testing.T) {
+	sec := func(id string, runes int) *entity.ScoredSection {
+		return &entity.ScoredSection{ID: id, Text: strings.Repeat("é", runes)}
+	}
+	ids := func(sections []*entity.ScoredSection) string {
+		var b strings.Builder
+		for _, s := range sections {
+			b.WriteString(s.ID)
+		}
+		return b.String()
+	}
+
+	// c dépasse le budget restant et est sautée, d (courte) passe encore
+	got := fitContextBudget([]*entity.ScoredSection{sec("a", 2000), sec("b", 2000), sec("c", 1000), sec("d", 400)})
+	if ids(got) != "abd" {
+		t.Fatalf("sections gardées : %s, attendu abd", ids(got))
+	}
+
+	// La première est gardée même seule au-dessus du budget
+	if got := fitContextBudget([]*entity.ScoredSection{sec("a", maxContextRunes+1), sec("b", 10)}); ids(got) != "a" {
+		t.Fatalf("sections gardées : %s, attendu a", ids(got))
+	}
+}
