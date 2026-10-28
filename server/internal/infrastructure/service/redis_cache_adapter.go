@@ -3,9 +3,7 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -140,24 +138,6 @@ func (c *RedisCacheAdapter) Set(ctx context.Context, key string, value interface
 
 	c.memStore[key] = &cacheEntry{Data: b, Expires: time.Now().Add(cacheTTL)}
 	return nil
-}
-
-// Invalidate supprime une entrée du cache.
-func (c *RedisCacheAdapter) Invalidate(ctx context.Context, key string) error {
-	if c.useRedis && c.client != nil {
-		return c.client.Del(ctx, key).Err()
-	}
-	c.memMu.Lock()
-	delete(c.memStore, key)
-	c.memMu.Unlock()
-	return nil
-}
-
-// GenerateKey génère une clé de cache.
-func (c *RedisCacheAdapter) GenerateKey(question, gameName string) string {
-	h := sha256.New()
-	h.Write([]byte(question + "|" + gameName))
-	return fmt.Sprintf("ask:%x", h.Sum(nil))
 }
 
 // cleanupMemCache supprime périodiquement les entrées expirées.

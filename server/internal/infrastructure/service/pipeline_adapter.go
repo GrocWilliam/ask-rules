@@ -393,7 +393,6 @@ type chunk struct {
 	Text      string
 	PageStart int
 	PageEnd   int
-	Position  int
 	Heading   string // chapitre : « COMBAT > Attaque », vide si aucun titre détecté
 }
 
@@ -444,7 +443,6 @@ func chunkPages(pages []pageInfo) []chunk {
 	current.Grow(defaultChunkSize * 2)
 	currentLen := 0
 	pageStart, pageEnd := 0, 0
-	position := 0
 	// Chapitre courant : un titre en majuscules ouvre un chapitre (niveau 1),
 	// un titre en casse normale une partie de ce chapitre (niveau 2).
 	var chapter, part string
@@ -462,10 +460,8 @@ func chunkPages(pages []pageInfo) []chunk {
 				Text:      s,
 				PageStart: pageStart,
 				PageEnd:   pageEnd,
-				Position:  position,
 				Heading:   heading(),
 			})
-			position++
 		}
 		current.Reset()
 		currentLen = 0
@@ -498,10 +494,8 @@ func chunkPages(pages []pageInfo) []chunk {
 					Text:      sc,
 					PageStart: para.PageStart,
 					PageEnd:   para.PageEnd,
-					Position:  position,
 					Heading:   heading(),
 				})
-				position++
 			}
 			continue
 		}

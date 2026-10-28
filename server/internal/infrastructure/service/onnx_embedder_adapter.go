@@ -310,11 +310,6 @@ func (e *ONNXEmbedderAdapter) embed(text string) ([]float32, error) {
 	return meanPoolAndNormalize(outTensor.GetData(), int(n)), nil
 }
 
-// Dimensions retourne la dimension des vecteurs produits (384 pour E5-small).
-func (e *ONNXEmbedderAdapter) Dimensions() int {
-	return embeddingDims
-}
-
 // ── Tokenisation Unigram SentencePiece (Metaspace / ▁) ─────────────────────
 
 // tokenize tokenise `text` (préfixe E5 déjà inclus) : <s> + tokens + </s>,

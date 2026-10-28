@@ -32,7 +32,6 @@ type ImportGameUseCase struct {
 	gameRepo    repository.GameRepository
 	sectionRepo repository.SectionRepository
 	pipeline    PipelineService
-	uploadsDir  string
 	logRepo     LogRepository
 }
 
@@ -41,14 +40,12 @@ func NewImportGameUseCase(
 	gameRepo repository.GameRepository,
 	sectionRepo repository.SectionRepository,
 	pipeline PipelineService,
-	uploadsDir string,
 	logRepo LogRepository,
 ) *ImportGameUseCase {
 	return &ImportGameUseCase{
 		gameRepo:    gameRepo,
 		sectionRepo: sectionRepo,
 		pipeline:    pipeline,
-		uploadsDir:  uploadsDir,
 		logRepo:     logRepo,
 	}
 }

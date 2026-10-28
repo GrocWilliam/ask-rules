@@ -50,7 +50,7 @@ func TestQuery_CanceledContext(t *testing.T) {
 func TestQuery_NoProviderReturnsContext(t *testing.T) {
 	m := &ChatLLMAdapter{client: http.DefaultClient}
 	resp, err := m.Query(context.Background(), "question", "contexte", nil, nil)
-	if err != nil || resp.Answer != "contexte" || resp.UsedLLM {
+	if err != nil || resp.Answer != "contexte" {
 		t.Fatalf("sans LLM, le contexte doit être renvoyé tel quel : %+v (err %v)", resp, err)
 	}
 }

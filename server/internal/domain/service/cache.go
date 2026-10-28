@@ -14,7 +14,4 @@ type CacheService interface {
 
 	// Set stocke une valeur dans le cache avec un TTL.
 	Set(ctx context.Context, key string, value interface{}) error
-
-	// Invalidate supprime une clé du cache.
-	Invalidate(ctx context.Context, key string) error
 }

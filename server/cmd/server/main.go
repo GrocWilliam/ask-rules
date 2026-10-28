@@ -62,8 +62,8 @@ func main() {
 	getGameUseCase := usecase.NewGetGameUseCase(gameRepo)
 	upsertGameUseCase := usecase.NewUpsertGameUseCase(gameRepo)
 	deleteGameUseCase := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo, cacheSvc)
-	importGameUseCase := usecase.NewImportGameUseCase(gameRepo, sectionRepo, pipelineSvc, config.C.UploadsDir, logRepo)
-	reprocessGameUseCase := usecase.NewReprocessGameUseCase(gameRepo, sectionRepo, pipelineSvc, config.C.UploadsDir, logRepo)
+	importGameUseCase := usecase.NewImportGameUseCase(gameRepo, sectionRepo, pipelineSvc, logRepo)
+	reprocessGameUseCase := usecase.NewReprocessGameUseCase(gameRepo, sectionRepo, pipelineSvc, logRepo)
 
 	// Admin use cases
 	adminAuthUseCase := usecase.NewAdminAuthUseCase(config.C.AdminPassword, logRepo)

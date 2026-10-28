@@ -19,9 +19,6 @@ type LLMService interface {
 
 	// Warmup réveille en arrière-plan un LLM mis en veille (sans bloquer).
 	Warmup()
-
-	// ModelName retourne le nom du modèle utilisé (ex: "mistral-small-latest").
-	ModelName() string
 }
 
 // LLMResponse représente la réponse d'un LLM.
@@ -31,9 +28,6 @@ type LLMResponse struct {
 
 	// Model est le nom du modèle utilisé.
 	Model string
-
-	// UsedLLM indique si un LLM a été utilisé (false : aucun LLM configuré, le contexte est renvoyé tel quel).
-	UsedLLM bool
 
 	// TokensUsed compte les tokens consommés (input + output).
 	TokensUsed *TokenUsage

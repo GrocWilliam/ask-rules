@@ -15,9 +15,6 @@ type EmbedderService interface {
 	// EmbedPassage génère le vecteur d'un passage de document à indexer.
 	// Les modèles asymétriques (E5) encodent requêtes et passages différemment.
 	EmbedPassage(ctx context.Context, text string) ([]float32, error)
-
-	// Dimensions retourne la dimension des vecteurs produits (ex: 384 pour E5-small).
-	Dimensions() int
 }
 
 // ReleasableEmbedder est implémenté par les embedders capables de libérer

@@ -33,7 +33,7 @@ func historyFixture(searchQueries *[]string, llmHistory *[]entity.ChatTurn, llmC
 		queryFunc: func(ctx context.Context, question, context string, history []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error) {
 			*llmCalls++
 			*llmHistory = history
-			return &service.LLMResponse{Answer: "Réponse", Model: "mock-model", UsedLLM: true}, nil
+			return &service.LLMResponse{Answer: "Réponse", Model: "mock-model"}, nil
 		},
 	}
 	return usecase.NewAskQuestionUseCase(gameRepo, retriever, llmSvc, newMockCache(), &mockLogRepo{})

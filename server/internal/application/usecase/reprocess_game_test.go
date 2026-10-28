@@ -20,7 +20,7 @@ func reprocessFixture(process func(sections *mockSectionRepo) error) (*usecase.R
 	pipeline := &mockPipeline{processFunc: func(ctx context.Context, opts *usecase.ImportOptions) error {
 		return process(sectionRepo)
 	}}
-	return usecase.NewReprocessGameUseCase(gameRepo, sectionRepo, pipeline, "", nil), gameRepo, sectionRepo
+	return usecase.NewReprocessGameUseCase(gameRepo, sectionRepo, pipeline, nil), gameRepo, sectionRepo
 }
 
 // Un pipeline réussi remplace les anciennes sections et invalide le cache du jeu.

@@ -18,7 +18,6 @@ type ReprocessGameUseCase struct {
 	gameRepo    repository.GameRepository
 	sectionRepo repository.SectionRepository
 	pipeline    PipelineService
-	uploadsDir  string
 	logRepo     LogRepository
 }
 
@@ -27,14 +26,12 @@ func NewReprocessGameUseCase(
 	gameRepo repository.GameRepository,
 	sectionRepo repository.SectionRepository,
 	pipeline PipelineService,
-	uploadsDir string,
 	logRepo LogRepository,
 ) *ReprocessGameUseCase {
 	return &ReprocessGameUseCase{
 		gameRepo:    gameRepo,
 		sectionRepo: sectionRepo,
 		pipeline:    pipeline,
-		uploadsDir:  uploadsDir,
 		logRepo:     logRepo,
 	}
 }

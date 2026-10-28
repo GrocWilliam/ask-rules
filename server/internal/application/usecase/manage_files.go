@@ -10,13 +10,6 @@ import (
 	"time"
 )
 
-// FileService interface pour gérer les fichiers.
-type FileService interface {
-	List(ctx context.Context, baseDir string) ([]*FileInfo, error)
-	Delete(ctx context.Context, baseDir, slug, filename string) error
-	Serve(ctx context.Context, baseDir, slug, filename string) (string, error)
-}
-
 // FileInfo représente les métadonnées d'un fichier.
 type FileInfo struct {
 	Game         string    `json:"game"`

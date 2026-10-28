@@ -39,7 +39,7 @@ type fakeLLM struct{ service.LLMService }
 func (fakeLLM) Query(_ context.Context, _, _ string, _ []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error) {
 	onToken("**Oui**")
 	onToken(" (p. 4).")
-	return &service.LLMResponse{Answer: "**Oui** (p. 4).", Model: "mock", UsedLLM: true}, nil
+	return &service.LLMResponse{Answer: "**Oui** (p. 4).", Model: "mock"}, nil
 }
 
 func streamHandler() *AskHandler {

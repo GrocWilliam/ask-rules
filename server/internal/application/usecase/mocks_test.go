@@ -146,17 +146,12 @@ func (m *mockLLM) Query(ctx context.Context, question, context string, history [
 		onToken("answer")
 	}
 	return &service.LLMResponse{
-		Answer:  "Mocked answer",
-		Model:   "mock-model",
-		UsedLLM: true,
+		Answer: "Mocked answer",
+		Model:  "mock-model",
 	}, nil
 }
 
 func (m *mockLLM) Warmup() {}
-
-func (m *mockLLM) ModelName() string {
-	return "mock-model"
-}
 
 // Mock CacheService
 type mockCache struct {
@@ -186,11 +181,6 @@ func (m *mockCache) Set(ctx context.Context, key string, value interface{}) erro
 		return err
 	}
 	m.data[key] = b
-	return nil
-}
-
-func (m *mockCache) Invalidate(ctx context.Context, key string) error {
-	delete(m.data, key)
 	return nil
 }
 

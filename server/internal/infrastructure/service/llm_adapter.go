@@ -115,7 +115,7 @@ func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string
 		if onToken != nil {
 			onToken(contextText)
 		}
-		return &service.LLMResponse{Answer: contextText, UsedLLM: false}, nil
+		return &service.LLMResponse{Answer: contextText}, nil
 	}
 
 	var strip *fillerStripper
@@ -144,7 +144,6 @@ func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string
 	return &service.LLMResponse{
 		Answer:     stripFiller(resp.Answer),
 		Model:      resp.Model,
-		UsedLLM:    resp.UsedLLM,
 		TokensUsed: tokensUsed,
 	}, nil
 }
@@ -237,19 +236,6 @@ func (m *ChatLLMAdapter) query(ctx context.Context, question, ctxText string, hi
 		}
 		log.Printf("[WARN] LLM - %s a échoué, attente du réveil puis nouvel essai : %v", llmProvider.name, err)
 	}
-}
-
-// ModelName retourne le nom du modèle utilisé.
-func (m *ChatLLMAdapter) ModelName() string {
-	if m.provider == nil {
-		return "none"
-	}
-
-	if m.provider.model == "" {
-		return m.provider.name
-	}
-
-	return m.provider.model
 }
 
 // ── API chat/completions ────────────────────────────────
@@ -399,9 +385,8 @@ func (m *ChatLLMAdapter) queryChat(ctx context.Context, llmProvider chatProvider
 	}
 
 	return entity.LLMResponse{
-		Answer:  answer,
-		Model:   result.Model,
-		UsedLLM: true,
+		Answer: answer,
+		Model:  result.Model,
 		Tokens: &entity.TokenUsage{
 			Prompt:     result.Usage.PromptTokens,
 			Completion: result.Usage.CompletionTokens,
@@ -505,5 +490,5 @@ func readChatStream(provider string, body io.Reader, onToken func(string)) (enti
 		log.Printf("[WARN] %s - réponse tronquée à %d tokens (id=%s)", provider, llmMaxTokens, id)
 	}
 
-	return entity.LLMResponse{Answer: answer.String(), Model: model, UsedLLM: true, Tokens: tokens}, nil
+	return entity.LLMResponse{Answer: answer.String(), Model: model, Tokens: tokens}, nil
 }

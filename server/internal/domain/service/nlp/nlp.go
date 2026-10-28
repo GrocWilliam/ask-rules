@@ -178,94 +178,6 @@ func ExtractSearchTerms(text string) []string {
 	return result
 }
 
-// actionVerbs liste les verbes d'action typiques dans les règles de jeu.
-var actionVerbs = []string{
-	// Composants
-	"piocher", "placer", "poser", "retirer", "défausser", "mélanger", "retourner",
-	"révéler", "dévoiler", "distribuer", "récupérer", "prendre", "remettre",
-	// Mouvement
-	"déplacer", "avancer", "reculer", "traverser", "entrer", "sortir", "franchir",
-	// Combat
-	"attaquer", "défendre", "combattre", "éliminer", "capturer", "protéger",
-	// Ressources
-	"collecter", "récolter", "produire", "payer", "acheter", "vendre", "dépenser",
-	"gagner", "perdre", "obtenir", "recevoir",
-	// Construction
-	"construire", "améliorer", "upgrader", "recruter", "déployer",
-	// Cartes / main
-	"jouer", "activer", "choisir", "sélectionner", "passer", "échanger",
-	"lancer", "résoudre", "appliquer", "déclencher",
-	// Tour
-	"commencer", "terminer", "finir", "passer", "sauter", "reporter",
-}
-
-// actionVerbsNorm est la version normalisée (sans accents) des verbes.
-var actionVerbsNorm []string
-
-func init() {
-	for _, v := range actionVerbs {
-		actionVerbsNorm = append(actionVerbsNorm, normalize(v))
-	}
-}
-
-// ExtractEntities extrait les entités nommées d'un texte :
-// composants du jeu (gameNouns) et mots capitalisés (noms propres de cartes/zones).
-func ExtractEntities(text string) []string {
-	seen := map[string]bool{}
-	var result []string
-
-	// 1. Noms du domaine jeu présents dans le texte (normalisés)
-	normText := normalize(text)
-	wordsNorm := strings.FieldsFunc(normText, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	})
-	for _, w := range wordsNorm {
-		lw := strings.ToLower(w)
-		if gameNouns[lw] && !seen[lw] {
-			seen[lw] = true
-			result = append(result, lw)
-		}
-	}
-
-	// 2. Mots capitalisés (noms propres hors début de phrase)
-	sentences := regexp.MustCompile(`[.!?]\s+`).Split(text, -1)
-	for _, sent := range sentences {
-		words := strings.Fields(sent)
-		for i, w := range words {
-			if i == 0 {
-				continue // ignorer le premier mot de la phrase
-			}
-			clean := strings.TrimFunc(w, func(r rune) bool { return !unicode.IsLetter(r) })
-			if len(clean) >= 2 && unicode.IsUpper([]rune(clean)[0]) {
-				lw := strings.ToLower(normalize(clean))
-				if !frenchStopwords[lw] && !seen[lw] {
-					seen[lw] = true
-					result = append(result, clean)
-				}
-			}
-		}
-	}
-
-	if len(result) > 20 {
-		result = result[:20]
-	}
-	return result
-}
-
-// ExtractActions extrait les verbes d'action présents dans un texte.
-func ExtractActions(text string) []string {
-	lower := normalize(strings.ToLower(text))
-	seen := map[string]bool{}
-	var result []string
-	for i, verbNorm := range actionVerbsNorm {
-		if strings.Contains(lower, verbNorm) && !seen[verbNorm] {
-			seen[verbNorm] = true
-			result = append(result, actionVerbs[i])
-		}
-	}
-	return result
-}
-
 // GameMeta contient les métadonnées extraites des règles du jeu.
 type GameMeta struct {
 	PlayersMin  int    `json:"players_min,omitempty"`
@@ -563,8 +475,4 @@ var gameNouns = map[string]bool{
 	// Stratégie
 	"strategie": true, "strategies": true, "tactique": true, "tactiques": true,
 	"combo": true, "combos": true, "synergie": true, "synergies": true,
-}
-
-func isStopword(w string) bool {
-	return frenchStopwords[w]
 }
