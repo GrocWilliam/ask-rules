@@ -123,43 +123,40 @@ pnpm run dev:front      # Vite dev server pour SvelteKit
 
 Côté serveur, [Mage](https://magefile.org) regroupe les tâches Go (`go install github.com/magefile/mage@latest`, puis depuis `server/`) :
 
-| Commande     | Description                                         |
-| ------------ | --------------------------------------------------- |
-| `mage`       | `go vet` + tests (cible par défaut)                 |
-| `mage dev`   | Live-reload avec Air                                |
-| `mage build` | Compile `ask-rules-server`                          |
-| `mage eval`  | Évaluation du retrieval (`DATABASE_URL` à définir)  |
-| `mage -l`    | Liste les cibles                                    |
+| Commande     | Description                                        |
+| ------------ | -------------------------------------------------- |
+| `mage`       | `go vet` + tests (cible par défaut)                |
+| `mage dev`   | Live-reload avec Air                               |
+| `mage build` | Compile `ask-rules-server`                         |
+| `mage eval`  | Évaluation du retrieval (`DATABASE_URL` à définir) |
+| `mage -l`    | Liste les cibles                                   |
 
 ---
 
 ## Variables d'environnement
 
-| Variable                    | Défaut                                                    | Description                                                                                                                                                                            |
-| --------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENV`                       | `development`                                             | Environnement (`development` ou `production`)                                                                                                                                          |
-| `DATABASE_URL`              | `postgresql://postgres:postgres@localhost:5432/ask-rules` | PostgreSQL                                                                                                                                                                             |
-| `PORT`                      | `3001`                                                    | Port d'écoute (8080 dans Docker)                                                                                                                                                       |
-| `LLM_BASE_URL`              | —                                                         | API compatible OpenAI du LLM principal, sans `/chat/completions` (ex : `http://llama.railway.internal:8080/v1`, `https://api.mistral.ai/v1`)                                           |
-| `LLM_API_KEY`               | —                                                         | Clé d'API (optionnelle pour llama.cpp sans `--api-key`)                                                                                                                                |
-| `LLM_MODEL`                 | —                                                         | Modèle (optionnel pour llama.cpp)                                                                                                                                                      |
-| `LLM_TIMEOUT_SECONDS`       | `60`                                                      | Délai max d'une requête, tentatives comprises                                                                                                                                          |
-| `LLM_REQUESTS_PER_SECOND`   | `0`                                                       | Cadence max (0 = illimitée ; `1` pour l'offre gratuite Mistral). Les 429/5xx sont réessayés avec backoff                                                                               |
-| `LLM_HEALTH_URL`            | —                                                         | Endpoint de santé d'un LLM pouvant être mis en veille (llama.cpp : `http://<hôte>/health`). S'il ne répond pas, le LLM est réveillé en arrière-plan et la question part sur le secours |
-| `LLM_WAKE_TIMEOUT_SECONDS`  | `300`                                                     | Durée max du réveil en arrière-plan                                                                                                                                                    |
-| `LLM_FALLBACK_*`            | —                                                         | Mêmes variables (`BASE_URL`, `API_KEY`, `MODEL`, `TIMEOUT_SECONDS`, `REQUESTS_PER_SECOND`, `HEALTH_URL`, `WAKE_TIMEOUT_SECONDS`) pour le LLM de secours                                |
-| `ADMIN_PASSWORD`            | —                                                         | Mot de passe interface admin (sans valeur, l’admin est désactivé)                                                                                                                      |
-| `ASK_RATE_LIMIT_PER_MINUTE` | `10`                                                      | Questions max par minute et par IP sur `/api/ask` et `/api/ask/stream` (`0` = illimité). Au-delà : HTTP 429 avec `Retry-After`                                                         |
-| `REDIS_ENABLED`             | `false`                                                   | Activer le cache Redis                                                                                                                                                                 |
-| `REDIS_URL`                 | `redis://localhost:6379`                                  | URL Redis                                                                                                                                                                              |
-| `UPLOADS_DIR`               | `../uploads`                                              | Répertoire des fichiers uploadés                                                                                                                                                       |
-| `MODEL_PATH`                | `../models/multilingual-e5-small`                         | Chemin du modèle ONNX                                                                                                                                                                  |
-| `MODEL_QUANTIZED`           | `true`                                                    | Télécharger le modèle int8 (118 Mo) au lieu du fp32 (470 Mo)                                                                                                                           |
-| `ONNX_THREADS`              | `2`                                                       | Threads ONNX Runtime par inférence                                                                                                                                                     |
+| Variable                    | Défaut                                                    | Description                                                                                                                                                          |
+| --------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENV`                       | `development`                                             | Environnement (`development` ou `production`)                                                                                                                        |
+| `DATABASE_URL`              | `postgresql://postgres:postgres@localhost:5432/ask-rules` | PostgreSQL                                                                                                                                                           |
+| `PORT`                      | `3001`                                                    | Port d'écoute (8080 dans Docker)                                                                                                                                     |
+| `LLM_BASE_URL`              | —                                                         | API compatible OpenAI du LLM, sans `/chat/completions` (ex : `http://llama.railway.internal:8080/v1`, `https://api.mistral.ai/v1`)                                   |
+| `LLM_API_KEY`               | —                                                         | Clé d'API (optionnelle pour llama.cpp sans `--api-key`)                                                                                                              |
+| `LLM_MODEL`                 | —                                                         | Modèle (optionnel pour llama.cpp)                                                                                                                                    |
+| `LLM_TIMEOUT_SECONDS`       | `60`                                                      | Délai max d'une requête, tentatives comprises                                                                                                                        |
+| `LLM_REQUESTS_PER_SECOND`   | `0`                                                       | Cadence max (0 = illimitée ; `1` pour l'offre gratuite Mistral). Les 429/5xx sont réessayés avec backoff                                                             |
+| `LLM_HEALTH_URL`            | —                                                         | Endpoint de santé d'un LLM pouvant être mis en veille (llama.cpp : `http://<hôte>/health`). S'il ne répond pas, le LLM est réveillé et la question attend son réveil |
+| `LLM_WAKE_TIMEOUT_SECONDS`  | `300`                                                     | Durée max du réveil (et de l'attente d'une question)                                                                                                                 |
+| `ADMIN_PASSWORD`            | —                                                         | Mot de passe interface admin (sans valeur, l’admin est désactivé)                                                                                                    |
+| `ASK_RATE_LIMIT_PER_MINUTE` | `10`                                                      | Questions max par minute et par IP sur `/api/ask` et `/api/ask/stream` (`0` = illimité). Au-delà : HTTP 429 avec `Retry-After`                                       |
+| `REDIS_ENABLED`             | `false`                                                   | Activer le cache Redis                                                                                                                                               |
+| `REDIS_URL`                 | `redis://localhost:6379`                                  | URL Redis                                                                                                                                                            |
+| `UPLOADS_DIR`               | `../uploads`                                              | Répertoire des fichiers uploadés                                                                                                                                     |
+| `MODEL_PATH`                | `../models/multilingual-e5-small`                         | Chemin du modèle ONNX                                                                                                                                                |
+| `MODEL_QUANTIZED`           | `true`                                                    | Télécharger le modèle int8 (118 Mo) au lieu du fp32 (470 Mo)                                                                                                         |
+| `ONNX_THREADS`              | `2`                                                       | Threads ONNX Runtime par inférence                                                                                                                                   |
 
-**Priorité LLM** : le LLM principal (`LLM_*`), avec bascule sur le secours (`LLM_FALLBACK_*`) en cas d'échec (quota atteint, panne, délai dépassé). Quand un secours existe, le principal n'est tenté qu'une fois.
-
-**LLM en veille** : avec `LLM_HEALTH_URL`, la santé du LLM est vérifiée avant chaque question (au plus toutes les 30 s). S'il dort, il est réveillé en arrière-plan et la question part sur le secours ; sans secours, la requête attend le réveil (60 s max). Le frontend appelle aussi `POST /api/llm/warmup` dès le chargement de la page, pour que le LLM soit réveillé pendant que l'utilisateur écrit sa question. Sans `LLM_BASE_URL` ni `LLM_FALLBACK_BASE_URL`, les réponses sont construites uniquement depuis le contexte récupéré (pas de génération).
+**LLM en veille** : avec `LLM_HEALTH_URL`, la santé du LLM est vérifiée avant chaque question (au plus toutes les 30 s). S'il dort, il est réveillé et la question attend son réveil (`LLM_WAKE_TIMEOUT_SECONDS` max) ; si l'appel échoue juste après un contrôle positif (serveur rendormi, modèle en rechargement), le réveil et l'appel sont relancés une fois. Le frontend appelle `POST /api/llm/warmup` au chargement de la page, au retour sur l'onglet et quand l'utilisateur commence à écrire sa question (au plus toutes les 30 s). Sans `LLM_BASE_URL`, les réponses sont construites uniquement depuis le contexte récupéré (pas de génération).
 
 **Note** : En `ENV=development`, le client LLM ignore les erreurs TLS (InsecureSkipVerify).
 
@@ -365,8 +362,6 @@ Accessible sur `/admin` (mot de passe via `ADMIN_PASSWORD`) :
 - **`/admin/files`** — fichiers uploadés groupés par jeu, suppression
 - **`/admin/logs`** — journal des événements groupé par date
 - **`/import`** — import de nouveaux fichiers avec progression live (SSE)
-
-
 
 ## Choix du modèle
 

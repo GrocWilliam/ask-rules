@@ -2,9 +2,8 @@
 //
 // Un LLM auto-hébergé (llama.cpp sur Railway…) peut être mis en veille quand il
 // est inactif : le réveil (démarrage + chargement du modèle) prend du temps.
-// Plutôt que de faire attendre l'utilisateur, on vérifie l'endpoint de santé
-// avant chaque appel ; s'il ne répond pas, on réveille le serveur en arrière-plan
-// et la question part sur le secours.
+// On vérifie l'endpoint de santé avant chaque appel ; s'il ne répond pas, on
+// réveille le serveur en arrière-plan et la question attend son réveil.
 package service
 
 import (
@@ -121,11 +120,15 @@ func (h *healthState) wake() {
 	}()
 }
 
-// waitReady attend que le serveur soit prêt (ou l'annulation du contexte).
+// waitReady attend que le serveur soit prêt, au plus wakeTimeout (ou jusqu'à
+// l'annulation du contexte). Le réveil est relancé si sa boucle s'est arrêtée
+// avant la fin de l'attente.
 func (h *healthState) waitReady(ctx context.Context) error {
 	if h.ready(ctx) {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(ctx, h.wakeTimeout)
+	defer cancel()
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	for {
@@ -136,6 +139,7 @@ func (h *healthState) waitReady(ctx context.Context) error {
 			if h.fresh() {
 				return nil
 			}
+			h.wake()
 		}
 	}
 }

@@ -32,7 +32,7 @@ type LLMResponse struct {
 	// Model est le nom du modèle utilisé.
 	Model string
 
-	// UsedLLM indique si un LLM a été utilisé (false = fallback).
+	// UsedLLM indique si un LLM a été utilisé (false : aucun LLM configuré, le contexte est renvoyé tel quel).
 	UsedLLM bool
 
 	// TokensUsed compte les tokens consommés (input + output).

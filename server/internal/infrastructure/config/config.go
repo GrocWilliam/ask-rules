@@ -18,9 +18,8 @@ type Config struct {
 	DatabaseURL string
 
 	// LLM : API compatible OpenAI (chat/completions) — llama.cpp, Mistral,
-	// Ollama, OpenAI… Le secours n'est utilisé que si le principal échoue.
-	LLM         LLMProvider
-	LLMFallback LLMProvider
+	// Ollama, OpenAI…
+	LLM LLMProvider
 
 	// Admin
 	AdminPassword string
@@ -57,9 +56,9 @@ type LLMProvider struct {
 	Timeout time.Duration
 	// HealthURL : endpoint de santé d'un serveur pouvant être mis en veille
 	// (llama.cpp : <hôte>/health). S'il ne répond pas, le serveur est réveillé
-	// en arrière-plan et la question part sur le secours.
+	// en arrière-plan et la question attend son réveil.
 	HealthURL string
-	// WakeTimeout : durée max du réveil en arrière-plan
+	// WakeTimeout : durée max du réveil (et de l'attente d'une question)
 	WakeTimeout time.Duration
 }
 
@@ -74,7 +73,6 @@ func Load() error {
 		Port:                  getEnv("PORT", "3001"),
 		DatabaseURL:           getEnv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/ask-rules"),
 		LLM:                   loadLLMProvider("LLM_"),
-		LLMFallback:           loadLLMProvider("LLM_FALLBACK_"),
 		AdminPassword:         getEnv("ADMIN_PASSWORD", ""),
 		AskRateLimitPerMinute: getEnvIntAllowZero("ASK_RATE_LIMIT_PER_MINUTE", 10),
 		RedisEnabled:          getEnvBool("REDIS_ENABLED", false),

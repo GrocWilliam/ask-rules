@@ -28,10 +28,20 @@ func sleepyLLM(t *testing.T, asleepChecks int32) (srv *httptest.Server, healthCa
 	return srv, healthCalls, chatCalls
 }
 
-func withHealth(p chatProvider, srv *httptest.Server) chatProvider {
-	p.url = srv.URL + "/v1/chat/completions"
-	p.health = newHealthState(p.name, srv.URL+"/health", time.Minute, http.DefaultClient)
-	return p
+func sleepyAdapter(srv *httptest.Server) *ChatLLMAdapter {
+	return &ChatLLMAdapter{client: http.DefaultClient, provider: &chatProvider{
+		name:   "llama",
+		url:    srv.URL + "/v1/chat/completions",
+		health: newHealthState("llama", srv.URL+"/health", time.Minute, http.DefaultClient),
+	}}
+}
+
+// healthyURL : endpoint de santé qui répond toujours 200.
+func healthyURL(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(srv.Close)
+	return srv.URL
 }
 
 func eventually(t *testing.T, cond func() bool) {
@@ -45,43 +55,19 @@ func eventually(t *testing.T, cond func() bool) {
 	}
 }
 
-func TestHealth_AsleepPrimaryUsesFallbackThenWakes(t *testing.T) {
-	llama, _, llamaChat := sleepyLLM(t, 1)
-	plugsky, _ := fakeChat(t, http.StatusOK, "plugsky")
-	m := adapterFor(llama, plugsky)
-	m.providers[0] = withHealth(m.providers[0], llama)
-
-	resp, err := m.Query(context.Background(), "question", "contexte", nil, nil)
-	if err != nil || resp.Model != "plugsky" {
-		t.Fatalf("en veille : réponse attendue du secours, obtenu %+v (err %v)", resp, err)
-	}
-	if got := atomic.LoadInt32(llamaChat); got != 0 {
-		t.Errorf("serveur en veille : pas d'appel chat attendu, %d appels", got)
-	}
-
-	// Le réveil en arrière-plan aboutit : les questions suivantes vont au principal
-	eventually(t, m.providers[0].health.fresh)
-	resp, err = m.Query(context.Background(), "question", "contexte", nil, nil)
-	if err != nil || resp.Model != "llama" {
-		t.Fatalf("réveillé : réponse attendue du principal, obtenu %+v (err %v)", resp, err)
-	}
-}
-
-func TestHealth_AsleepWithoutFallbackWaits(t *testing.T) {
+func TestHealth_AsleepWaitsForWake(t *testing.T) {
 	llama, _, _ := sleepyLLM(t, 1)
-	m := &ChatLLMAdapter{client: http.DefaultClient}
-	m.providers = []chatProvider{withHealth(chatProvider{name: "llama"}, llama)}
+	m := sleepyAdapter(llama)
 
 	resp, err := m.Query(context.Background(), "question", "contexte", nil, nil)
 	if err != nil || resp.Model != "llama" {
-		t.Fatalf("sans secours : attente du réveil attendue, obtenu %+v (err %v)", resp, err)
+		t.Fatalf("en veille : attente du réveil attendue, obtenu %+v (err %v)", resp, err)
 	}
 }
 
-func TestHealth_AsleepWithoutFallbackRespectsDeadline(t *testing.T) {
+func TestHealth_AsleepRespectsDeadline(t *testing.T) {
 	llama, _, _ := sleepyLLM(t, 1000)
-	m := &ChatLLMAdapter{client: http.DefaultClient}
-	m.providers = []chatProvider{withHealth(chatProvider{name: "llama"}, llama)}
+	m := sleepyAdapter(llama)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -92,9 +78,56 @@ func TestHealth_AsleepWithoutFallbackRespectsDeadline(t *testing.T) {
 
 func TestWarmup_PingsHealth(t *testing.T) {
 	llama, healthCalls, _ := sleepyLLM(t, 0)
-	m := &ChatLLMAdapter{client: http.DefaultClient}
-	m.providers = []chatProvider{withHealth(chatProvider{name: "llama"}, llama)}
+	m := sleepyAdapter(llama)
 
 	m.Warmup()
 	eventually(t, func() bool { return atomic.LoadInt32(healthCalls) > 0 })
+}
+
+func TestHealth_WaitBoundedByWakeTimeout(t *testing.T) {
+	llama, _, _ := sleepyLLM(t, 1000)
+	m := sleepyAdapter(llama)
+	m.provider.health.wakeTimeout = 200 * time.Millisecond
+
+	if _, err := m.Query(context.Background(), "question", "contexte", nil, nil); err == nil {
+		t.Fatal("erreur attendue : réveil plus long que LLM_WAKE_TIMEOUT_SECONDS")
+	}
+}
+
+func TestHealth_WaitRelaunchesEndedWake(t *testing.T) {
+	llama, _, _ := sleepyLLM(t, 1)
+	h := newHealthState("llama", llama.URL+"/health", time.Minute, http.DefaultClient)
+	// Boucle de réveil précédente arrêtée sans succès : l'attente doit la relancer
+	h.wakeTimeout = 0
+	h.wake()
+	eventually(t, func() bool { h.mu.Lock(); defer h.mu.Unlock(); return !h.waking })
+	h.wakeTimeout = 10 * time.Second
+
+	if err := h.waitReady(context.Background()); err != nil {
+		t.Fatalf("réveil attendu, obtenu %v", err)
+	}
+}
+
+func TestHealth_FailureAfterHealthyCheckRetriesOnce(t *testing.T) {
+	var chatCalls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			return
+		}
+		// Premier appel : le serveur se rendort juste après le contrôle de santé
+		if atomic.AddInt32(&chatCalls, 1) == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		_, _ = w.Write([]byte(`{"model":"llama","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	resp, err := sleepyAdapter(srv).Query(context.Background(), "question", "contexte", nil, nil)
+	if err != nil || resp.Answer != "ok" {
+		t.Fatalf("nouvel essai attendu après réveil, obtenu %+v (err %v)", resp, err)
+	}
+	if got := atomic.LoadInt32(&chatCalls); got != 2 {
+		t.Errorf("2 appels attendus, obtenu %d", got)
+	}
 }

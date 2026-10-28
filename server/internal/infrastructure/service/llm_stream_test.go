@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakeStream simule une API chat/completions en streaming : envoie `events`
@@ -48,7 +49,7 @@ func TestQuery_StreamsTokens(t *testing.T) {
 	}, false)
 
 	var got []string
-	resp, err := adapterFor(srv, nil).Query(context.Background(), "q", "ctx", nil, func(s string) { got = append(got, s) })
+	resp, err := adapterFor(srv).Query(context.Background(), "q", "ctx", nil, func(s string) { got = append(got, s) })
 	if err != nil {
 		t.Fatalf("erreur inattendue : %v", err)
 	}
@@ -64,34 +65,18 @@ func TestQuery_StreamsTokens(t *testing.T) {
 	}
 }
 
-func TestQuery_StreamFallsBackBeforeFirstToken(t *testing.T) {
-	mistral, _ := fakeChat(t, http.StatusTooManyRequests, "mistral")
-	plugsky, _ := fakeStream(t, []string{
-		`data: {"model":"plugsky","choices":[{"delta":{"content":"Réponse"},"finish_reason":"stop"}]}`,
-		`data: [DONE]`,
-	}, false)
-
-	var got strings.Builder
-	resp, err := adapterFor(mistral, plugsky).Query(context.Background(), "q", "ctx", nil, func(s string) { got.WriteString(s) })
-	if err != nil {
-		t.Fatalf("erreur inattendue : %v", err)
-	}
-	if got.String() != "Réponse" || resp.Model != "plugsky" {
-		t.Fatalf("bascule attendue sur plugsky : %q %+v", got.String(), resp)
-	}
-}
-
-func TestQuery_StreamNoFallbackAfterFirstToken(t *testing.T) {
-	mistral, _ := fakeStream(t, []string{
-		`data: {"model":"mistral","choices":[{"delta":{"content":"Début de réponse"}}]}`,
+func TestQuery_StreamNoRetryAfterFirstToken(t *testing.T) {
+	llama, calls := fakeStream(t, []string{
+		`data: {"model":"llama","choices":[{"delta":{"content":"Début de réponse"}}]}`,
 	}, true)
-	plugsky, plugskyCalls := fakeStream(t, []string{`data: [DONE]`}, false)
+	m := adapterFor(llama)
+	m.provider.health = newHealthState("llama", healthyURL(t), time.Minute, http.DefaultClient)
 
-	_, err := adapterFor(mistral, plugsky).Query(context.Background(), "q", "ctx", nil, func(string) {})
+	_, err := m.Query(context.Background(), "q", "ctx", nil, func(string) {})
 	if err == nil {
 		t.Fatal("une coupure en cours de réponse doit remonter une erreur")
 	}
-	if n := atomic.LoadInt32(plugskyCalls); n != 0 {
-		t.Fatalf("pas de bascule une fois la réponse entamée : %d appels au secours", n)
+	if n := atomic.LoadInt32(calls); n != 1 {
+		t.Fatalf("pas de nouvel essai une fois la réponse entamée : %d appels", n)
 	}
 }

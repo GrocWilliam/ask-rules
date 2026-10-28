@@ -30,9 +30,16 @@ function describeError(error: unknown): string {
   return 'serveur injoignable';
 }
 
+// Intervalle min entre deux réveils (le backend revérifie la santé au plus toutes les 30 s)
+const WARMUP_INTERVAL_MS = 30_000;
+let lastWarmup = 0;
+
 // Le LLM peut lui aussi être en veille : on le réveille dès que le backend
-// répond, pour qu'il soit prêt quand l'utilisateur posera sa question.
-function warmupLLM() {
+// répond, puis à chaque retour sur l'onglet ou début de saisie, pour qu'il
+// soit prêt quand l'utilisateur posera sa question.
+export function warmupLLM() {
+  if (Date.now() - lastWarmup < WARMUP_INTERVAL_MS) return;
+  lastWarmup = Date.now();
   fetch('/api/llm/warmup', { method: 'POST' }).catch(() => {});
 }
 

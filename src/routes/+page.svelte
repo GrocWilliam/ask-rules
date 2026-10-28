@@ -4,7 +4,7 @@
   import Markdown from '$lib/Markdown.svelte';
   import type { Game } from '../types/game.type';
   import { onDestroy, tick } from 'svelte';
-  import { gamesProgress, loadGames } from '$lib/gamesLoader';
+  import { gamesProgress, loadGames, warmupLLM } from '$lib/gamesLoader';
   import { askStream } from '$lib/askStream';
   import { fileHref, linkCitations } from '$lib/citations';
   import { detectGame } from '$lib/gameMatch';
@@ -151,6 +151,11 @@
   $: keepScreenOn(!!current || isLoading);
   onDestroy(() => keepScreenOn(false));
 
+  // Retour sur l'onglet : le LLM a pu se mettre en veille entre-temps
+  function handleVisibilityChange() {
+    if (document.visibilityState === 'visible') warmupLLM();
+  }
+
   // Dictée : le texte dicté complète ce qui était déjà saisi
   let voiceBase = '';
   function handleVoiceStart() {
@@ -260,6 +265,8 @@
     }
   }
 </script>
+
+<svelte:document on:visibilitychange={handleVisibilityChange} />
 
 <SEO
   title="Reglomatic — Assistant IA pour règles de jeux de société"
@@ -427,6 +434,7 @@
         disabled={isLoading}
         bind:value={questionText}
         on:keydown={handleTextareaKeydown}
+        on:focus={warmupLLM}
       ></textarea>
       <VoiceInput
         disabled={isLoading}

@@ -1,4 +1,4 @@
-// infrastructure/service/llm_adapter.go — Client LLM compatible OpenAI (principal + secours)
+// infrastructure/service/llm_adapter.go — Client LLM compatible OpenAI
 package service
 
 import (
@@ -85,14 +85,13 @@ func newChatProvider(llmConfig config.LLMProvider, client *http.Client) (chatPro
 	}, true
 }
 
-// ChatLLMAdapter implémente LLMService avec un fournisseur principal et un
-// secours optionnel (quota atteint, panne, serveur en veille…).
+// ChatLLMAdapter implémente LLMService avec un seul fournisseur.
 type ChatLLMAdapter struct {
-	client    *http.Client // partagé : réutilise les connexions TLS
-	providers []chatProvider
+	client   *http.Client  // partagé : réutilise les connexions TLS
+	provider *chatProvider // nil si LLM_BASE_URL n'est pas défini
 }
 
-// NewLLM crée l'adapter LLM à partir de la configuration LLM_* / LLM_FALLBACK_*.
+// NewLLM crée l'adapter LLM à partir de la configuration LLM_*.
 func NewLLM() service.LLMService {
 	m := &ChatLLMAdapter{
 		client: &http.Client{
@@ -104,17 +103,15 @@ func NewLLM() service.LLMService {
 			},
 		},
 	}
-	for _, llmConfig := range []config.LLMProvider{config.C.LLM, config.C.LLMFallback} {
-		if llmProvider, ok := newChatProvider(llmConfig, m.client); ok {
-			m.providers = append(m.providers, llmProvider)
-		}
+	if llmProvider, ok := newChatProvider(config.C.LLM, m.client); ok {
+		m.provider = &llmProvider
 	}
 	return m
 }
 
 // Query génère une réponse à partir de la question et du contexte fourni.
 func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string, history []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error) {
-	if len(m.providers) == 0 {
+	if m.provider == nil {
 		if onToken != nil {
 			onToken(contextText)
 		}
@@ -126,7 +123,7 @@ func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string
 		strip = &fillerStripper{out: onToken}
 		onToken = strip.write
 	}
-	resp, err := m.queryWithFallback(ctx, question, contextText, history, onToken)
+	resp, err := m.query(ctx, question, contextText, history, onToken)
 	if err != nil {
 		return nil, err
 	}
@@ -193,22 +190,21 @@ func (f *fillerStripper) flush() {
 	}
 }
 
-// Warmup réveille en arrière-plan les fournisseurs mis en veille, pour qu'ils
-// soient prêts quand l'utilisateur posera sa question.
+// Warmup réveille en arrière-plan le LLM mis en veille, pour qu'il soit prêt
+// quand l'utilisateur posera sa question.
 func (m *ChatLLMAdapter) Warmup() {
-	for _, provider := range m.providers {
-		if provider.health != nil {
-			go provider.health.ready(context.Background())
-		}
+	if m.provider != nil && m.provider.health != nil {
+		go m.provider.health.ready(context.Background())
 	}
 }
 
-// queryWithFallback interroge les fournisseurs dans l'ordre jusqu'au premier succès.
-// Quand un secours existe, le fournisseur principal n'est tenté qu'une fois :
-// mieux vaut basculer tout de suite que faire patienter l'utilisateur.
-// En streaming, pas de bascule une fois du texte transmis : le secours
-// recommencerait la réponse depuis le début.
-func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxText string, history []entity.ChatTurn, onToken func(string)) (entity.LLMResponse, error) {
+// query attend le réveil du LLM s'il est en veille, puis l'interroge.
+// Un échec juste après un contrôle de santé positif (serveur rendormi, modèle
+// en cours de rechargement…) relance le réveil et l'appel une fois.
+// En streaming, pas de nouvel essai une fois du texte transmis : la réponse
+// recommencerait depuis le début.
+func (m *ChatLLMAdapter) query(ctx context.Context, question, ctxText string, history []entity.ChatTurn, onToken func(string)) (entity.LLMResponse, error) {
+	llmProvider := *m.provider
 	streamed := false
 	if onToken != nil {
 		forward := onToken
@@ -218,70 +214,42 @@ func (m *ChatLLMAdapter) queryWithFallback(ctx context.Context, question, ctxTex
 		}
 	}
 
-	var errs []string
-	for i, llmProvider := range m.providers {
-		isLast := i == len(m.providers)-1
-		retries := llmMaxRetries
-
-		if !isLast {
-			retries = 0
-		}
-
+	for attempt := 0; ; attempt++ {
 		if llmProvider.health != nil {
-			if isLast {
-				// Pas d'autre fournisseur : attendre le réveil (dans la limite de la requête)
-				if err := llmProvider.health.waitReady(ctx); err != nil {
-					return entity.LLMResponse{}, fmt.Errorf("%s: en veille, réveil trop long : %w", llmProvider.name, err)
-				}
-			} else if !llmProvider.health.ready(ctx) {
-				log.Printf("[INFO] LLM - %s en veille, bascule sur %s", llmProvider.name, m.providers[i+1].name)
-				errs = append(errs, llmProvider.name+": en veille")
-				continue
+			if err := llmProvider.health.waitReady(ctx); err != nil {
+				return entity.LLMResponse{}, fmt.Errorf("%s: en veille, réveil trop long : %w", llmProvider.name, err)
 			}
 		}
 
-		resp, err := m.queryChat(ctx, llmProvider, retries, question, ctxText, history, onToken)
-		if llmProvider.health != nil {
-			if err == nil {
-				llmProvider.health.markOK()
-			} else {
-				llmProvider.health.markDown()
-			}
+		resp, err := m.queryChat(ctx, llmProvider, llmMaxRetries, question, ctxText, history, onToken)
+		if llmProvider.health == nil {
+			return resp, err
 		}
-
 		if err == nil {
-			if i > 0 {
-				log.Printf("[INFO] LLM - réponse fournie par %s (secours)", llmProvider.name)
-			}
+			llmProvider.health.markOK()
 			return resp, nil
 		}
 
-		// Client parti, délai de la requête dépassé ou réponse déjà entamée :
-		// inutile d'essayer le suivant
-		if ctx.Err() != nil || isLast || streamed {
-			if len(errs) > 0 {
-				return entity.LLMResponse{}, fmt.Errorf("%w (après échec : %s)", err, strings.Join(errs, " ; "))
-			}
+		llmProvider.health.markDown()
+		// Client parti, délai de la requête dépassé ou réponse déjà entamée : inutile de réessayer
+		if attempt > 0 || ctx.Err() != nil || streamed {
 			return entity.LLMResponse{}, err
 		}
-
-		log.Printf("[WARN] LLM - %s indisponible, bascule sur %s : %v", llmProvider.name, m.providers[i+1].name, err)
-		errs = append(errs, err.Error())
+		log.Printf("[WARN] LLM - %s a échoué, attente du réveil puis nouvel essai : %v", llmProvider.name, err)
 	}
-	return entity.LLMResponse{}, fmt.Errorf("aucun fournisseur LLM configuré")
 }
 
-// ModelName retourne le nom du modèle principal utilisé.
+// ModelName retourne le nom du modèle utilisé.
 func (m *ChatLLMAdapter) ModelName() string {
-	if len(m.providers) == 0 {
+	if m.provider == nil {
 		return "none"
 	}
 
-	if m.providers[0].model == "" {
-		return m.providers[0].name
+	if m.provider.model == "" {
+		return m.provider.name
 	}
 
-	return m.providers[0].model
+	return m.provider.model
 }
 
 // ── API chat/completions ────────────────────────────────
