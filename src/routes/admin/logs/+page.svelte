@@ -15,6 +15,9 @@
     }>;
   };
 
+  // Les filtres ajoutent ?type= au chemin résolu (resolve ne prend pas de query)
+  const logsPath = resolve('/admin/logs');
+
   // Regrouper les logs par date (calculé côté client)
   $: currentFilter = $page.url.searchParams.get('type');
   $: filteredLogs = currentFilter
@@ -82,23 +85,23 @@
 
   <!-- Filtres -->
   <div class="filters">
-    <a href={resolve('/admin/logs')} class="filter-btn" class:active={!currentFilter}>Tous</a>
+    <a href={logsPath} class="filter-btn" class:active={!currentFilter}>Tous</a>
     <a
-      href="/admin/logs?type=game_added"
+      href="{logsPath}?type=game_added"
       class="filter-btn green"
       class:active={currentFilter === 'game_added'}
     >
       🎲 Jeux ajoutés
     </a>
     <a
-      href="/admin/logs?type=game_updated"
+      href="{logsPath}?type=game_updated"
       class="filter-btn blue"
       class:active={currentFilter === 'game_updated'}
     >
       🔄 Mises à jour
     </a>
     <a
-      href="/admin/logs?type=rate_limit_blocked"
+      href="{logsPath}?type=rate_limit_blocked"
       class="filter-btn red"
       class:active={currentFilter === 'rate_limit_blocked'}
     >

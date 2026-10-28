@@ -23,7 +23,7 @@
         body: JSON.stringify({ password: pwd }),
       });
       if (res.ok) {
-        goto(returnToImport ? resolve('/import') : resolve('/admin/games'));
+        goto(resolve(returnToImport ? '/import' : '/admin/games'));
       } else {
         const d = await res.json().catch(() => ({}));
         error = d.error ?? 'Mot de passe incorrect';

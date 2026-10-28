@@ -14,7 +14,6 @@ export default [
       parserOptions: {
         parser: tseslint.parser,
         extraFileExtensions: ['.svelte'],
-        project: './tsconfig.json',
       },
     },
     rules: {
@@ -39,6 +38,7 @@ export default [
     ignores: [
       'node_modules/**',
       'build/**',
+      'server/build/**',
       'dist/**',
       '.svelte-kit/**',
       'uploads/**',

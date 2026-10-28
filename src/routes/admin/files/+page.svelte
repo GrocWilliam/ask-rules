@@ -131,7 +131,12 @@
               </div>
 
               <div class="file-actions">
-                <a href="/files/{file.relative_path}" class="btn btn-view" target="_blank">
+                <a
+                  href="/files/{file.relative_path}"
+                  class="btn btn-view"
+                  target="_blank"
+                  rel="noopener external"
+                >
                   👁️ Voir
                 </a>
 

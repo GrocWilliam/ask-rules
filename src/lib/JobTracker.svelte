@@ -260,7 +260,7 @@
     <details class="events-log">
       <summary>📋 Historique des événements ({events.length})</summary>
       <div class="events-list">
-        {#each events.slice().reverse() as event}
+        {#each events.slice().reverse() as event (event)}
           <div class="event">
             <span class="event-time">{event.timestamp.toLocaleTimeString()}</span>
             <span class="event-type">{event.type}</span>

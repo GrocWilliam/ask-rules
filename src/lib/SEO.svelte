@@ -10,7 +10,11 @@
   export let type = 'website';
 
   $: url = $page.url.href;
-  $: siteName = 'Reglomatic';
+
+  // JSON pour une balise script : « < » échappé, un texte (URL, description)
+  // ne peut pas contenir de balise fermante et sortir du JSON
+  const jsonLd = (data: unknown) => JSON.stringify(data).replace(/</g, '\\u003c');
+  const siteName = 'Reglomatic';
 </script>
 
 <svelte:head>
@@ -41,8 +45,9 @@
   <meta property="twitter:image" content={image} />
 
   <!-- Schema.org for Google -->
+  <!-- eslint-disable-next-line svelte/no-at-html-tags -- JSON échappé par jsonLd -->
   {@html `<script type="application/ld+json">
-    ${JSON.stringify({
+    ${jsonLd({
       '@context': 'https://schema.org',
       '@type': 'WebApplication',
       name: siteName,

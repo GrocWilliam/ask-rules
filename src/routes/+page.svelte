@@ -307,7 +307,12 @@
         {#if currentFiles}
           <div class="file-download">
             {#each currentFiles as filePath, index (filePath)}
-              <a href="/files/{filePath}" class="file-download-link" target="_blank" rel="noopener">
+              <a
+                href="/files/{filePath}"
+                class="file-download-link"
+                target="_blank"
+                rel="noopener external"
+              >
                 <span class="file-icon">📄</span>
                 <span class="file-text">
                   <span class="file-label">
@@ -364,7 +369,7 @@
                                 href={pageHref(s)}
                                 class="source-page source-page-link"
                                 target="_blank"
-                                rel="noopener"
+                                rel="noopener external"
                                 title="Ouvrir le livret de règles à cette page">{pageLabel(s)} ↗</a
                               >
                             {:else if s.page_num}
