@@ -11,24 +11,23 @@ import (
 
 // LogsHandler gère les requêtes HTTP pour les logs.
 type LogsHandler struct {
-	getLogsUseCase *usecase.GetLogsUseCase
+	logRepo usecase.LogRepository
 }
 
 // NewLogsHandler crée un nouveau handler.
-func NewLogsHandler(getLogsUseCase *usecase.GetLogsUseCase) *LogsHandler {
-	return &LogsHandler{getLogsUseCase: getLogsUseCase}
+func NewLogsHandler(logRepo usecase.LogRepository) *LogsHandler {
+	return &LogsHandler{logRepo: logRepo}
 }
 
 // Get traite les requêtes GET /api/admin/logs
 func (h *LogsHandler) Get(w http.ResponseWriter, r *http.Request) {
-	// Parser le paramètre limit
-	limitStr := r.URL.Query().Get("limit")
-	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit <= 0 {
+	// limit : 100 par défaut, 500 au plus
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit <= 0 || limit > 500 {
 		limit = 100
 	}
 
-	logs, err := h.getLogsUseCase.Execute(r.Context(), limit)
+	logs, err := h.logRepo.GetRecent(r.Context(), limit)
 	if err != nil {
 		log.Printf("[ERROR] /api/admin/logs - Failed to get logs: %v", err)
 		respondError(w, http.StatusInternalServerError, "Failed to get logs")

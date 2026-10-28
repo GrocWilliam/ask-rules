@@ -195,3 +195,14 @@ func (m *mockPipeline) Process(ctx context.Context, opts *usecase.ImportOptions)
 	}
 	return nil
 }
+
+// Mock LogRepository
+type mockLogRepo struct{}
+
+func (m *mockLogRepo) Save(ctx context.Context, entry *usecase.LogEntry) error {
+	return nil
+}
+
+func (m *mockLogRepo) GetRecent(ctx context.Context, limit int) ([]*usecase.LogEntry, error) {
+	return []*usecase.LogEntry{}, nil
+}

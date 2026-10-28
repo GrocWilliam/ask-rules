@@ -7,70 +7,64 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"time"
 
 	"ask-rules-server/internal/application/usecase"
 	"ask-rules-server/internal/domain/entity"
+	"ask-rules-server/internal/domain/repository"
 
 	"github.com/go-chi/chi/v5"
 )
 
 // GamesHandler gère les requêtes HTTP sur les jeux.
 type GamesHandler struct {
-	listUseCase   *usecase.ListGamesUseCase
-	getUseCase    *usecase.GetGameUseCase
+	gameRepo      repository.GameRepository
 	upsertUseCase *usecase.UpsertGameUseCase
 	deleteUseCase *usecase.DeleteGameUseCase
 }
 
 // NewGamesHandler crée un nouveau handler.
 func NewGamesHandler(
-	listUseCase *usecase.ListGamesUseCase,
-	getUseCase *usecase.GetGameUseCase,
+	gameRepo repository.GameRepository,
 	upsertUseCase *usecase.UpsertGameUseCase,
 	deleteUseCase *usecase.DeleteGameUseCase,
 ) *GamesHandler {
 	return &GamesHandler{
-		listUseCase:   listUseCase,
-		getUseCase:    getUseCase,
+		gameRepo:      gameRepo,
 		upsertUseCase: upsertUseCase,
 		deleteUseCase: deleteUseCase,
 	}
 }
 
+// gameSummary : un jeu dans la liste publique (sans fichiers ni métadonnées).
+type gameSummary struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	AddedAt       time.Time `json:"added_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	SectionsCount int       `json:"sections_count"`
+}
+
 // List traite les requêtes GET /api/games
 func (h *GamesHandler) List(w http.ResponseWriter, r *http.Request) {
-	games, err := h.listUseCase.Execute(r.Context())
+	games, err := h.gameRepo.List(r.Context())
 	if err != nil {
 		log.Printf("[ERROR] /api/games - Failed to list games: %v", err)
 		respondError(w, http.StatusInternalServerError, "Failed to list games: "+err.Error())
 		return
 	}
 
-	respondJSON(w, http.StatusOK, games)
-}
-
-// Get traite les requêtes GET /api/games/{id}
-func (h *GamesHandler) Get(w http.ResponseWriter, r *http.Request) {
-	gameID := chi.URLParam(r, "id")
-	if gameID == "" {
-		log.Printf("[ERROR] /api/games/{id} - Missing game ID")
-		respondError(w, http.StatusBadRequest, "Missing game ID")
-		return
-	}
-
-	game, err := h.getUseCase.Execute(r.Context(), gameID)
-	if err != nil {
-		if errors.Is(err, entity.ErrGameNotFound) {
-			log.Printf("[ERROR] /api/games/{id} - Game not found: %s", gameID)
-			respondError(w, http.StatusNotFound, "Game not found")
-			return
+	result := make([]gameSummary, len(games))
+	for i, g := range games {
+		result[i] = gameSummary{
+			ID:            g.ID,
+			Name:          g.Name,
+			AddedAt:       g.AddedAt,
+			UpdatedAt:     g.UpdatedAt,
+			SectionsCount: g.SectionsCount,
 		}
-		log.Printf("[ERROR] /api/games/{id} - Failed to get game %s: %v", gameID, err)
-		respondError(w, http.StatusInternalServerError, "Failed to get game")
-		return
 	}
-
-	respondJSON(w, http.StatusOK, game)
+	respondJSON(w, http.StatusOK, result)
 }
 
 // Upsert traite les requêtes POST /api/admin/games (create or update)

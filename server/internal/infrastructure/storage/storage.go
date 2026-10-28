@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -103,4 +104,88 @@ func sanitizeFilename(name string) string {
 		safe = "file"
 	}
 	return safe + ext
+}
+
+// FileInfo décrit un fichier uploadé (page admin des fichiers).
+type FileInfo struct {
+	Game         string    `json:"game"`
+	Name         string    `json:"name"`
+	Size         int64     `json:"size"`
+	Modified     time.Time `json:"modified"`
+	RelativePath string    `json:"relative_path"`
+	Path         string    `json:"path"`
+}
+
+// ListFiles liste les fichiers de tous les jeux (UPLOADS_DIR/{slug}/*).
+func ListFiles() ([]*FileInfo, error) {
+	files := []*FileInfo{}
+	entries, err := os.ReadDir(config.C.UploadsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return files, nil
+		}
+		return nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		slug := entry.Name()
+		gameDir := filepath.Join(config.C.UploadsDir, slug)
+		gameFiles, err := os.ReadDir(gameDir)
+		if err != nil {
+			continue
+		}
+		for _, file := range gameFiles {
+			if file.IsDir() {
+				continue
+			}
+			info, err := file.Info()
+			if err != nil {
+				continue
+			}
+			files = append(files, &FileInfo{
+				Game:         slug,
+				Name:         file.Name(),
+				Size:         info.Size(),
+				Modified:     info.ModTime(),
+				RelativePath: filepath.Join(slug, file.Name()),
+				Path:         filepath.Join(gameDir, file.Name()),
+			})
+		}
+	}
+	return files, nil
+}
+
+// GameFilePath retourne le chemin absolu de UPLOADS_DIR/{slug}/{filename}
+// (slug et filename viennent de l'URL). L'erreur enveloppe fs.ErrNotExist si
+// le fichier n'existe pas.
+func GameFilePath(slug, filename string) (string, error) {
+	// Pas de path traversal hors de UPLOADS_DIR
+	if strings.Contains(slug, "..") || strings.Contains(filename, "..") {
+		return "", fmt.Errorf("invalid path: contains '..'")
+	}
+	if slug == "" || filename == "" {
+		return "", fmt.Errorf("slug and filename are required")
+	}
+	absPath := filepath.Join(config.C.UploadsDir, slug, filename)
+	if _, err := os.Stat(absPath); err != nil {
+		return "", fmt.Errorf("file not found: %w", err)
+	}
+	return absPath, nil
+}
+
+// DeleteGameFile supprime UPLOADS_DIR/{slug}/{filename}, puis le dossier du
+// jeu s'il est vide.
+func DeleteGameFile(slug, filename string) error {
+	absPath, err := GameFilePath(slug, filename)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(absPath); err != nil {
+		return fmt.Errorf("failed to delete file: %w", err)
+	}
+	os.Remove(filepath.Dir(absPath)) // sans effet si le dossier n'est pas vide
+	return nil
 }

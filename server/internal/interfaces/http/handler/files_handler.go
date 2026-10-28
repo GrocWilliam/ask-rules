@@ -7,42 +7,26 @@ import (
 	"log"
 	"net/http"
 
-	"ask-rules-server/internal/application/usecase"
+	"ask-rules-server/internal/infrastructure/storage"
 
 	"github.com/go-chi/chi/v5"
 )
 
-// FilesHandler gère les requêtes HTTP pour les fichiers.
-type FilesHandler struct {
-	listUseCase   *usecase.ListFilesUseCase
-	deleteUseCase *usecase.DeleteFileUseCase
-	serveUseCase  *usecase.ServeFileUseCase
-}
+// FilesHandler gère les requêtes HTTP pour les fichiers uploadés (UPLOADS_DIR).
+type FilesHandler struct{}
 
 // NewFilesHandler crée un nouveau handler.
-func NewFilesHandler(
-	listUseCase *usecase.ListFilesUseCase,
-	deleteUseCase *usecase.DeleteFileUseCase,
-	serveUseCase *usecase.ServeFileUseCase,
-) *FilesHandler {
-	return &FilesHandler{
-		listUseCase:   listUseCase,
-		deleteUseCase: deleteUseCase,
-		serveUseCase:  serveUseCase,
-	}
+func NewFilesHandler() *FilesHandler {
+	return &FilesHandler{}
 }
 
 // List traite les requêtes GET /api/admin/files
 func (h *FilesHandler) List(w http.ResponseWriter, r *http.Request) {
-	files, err := h.listUseCase.Execute(r.Context())
+	files, err := storage.ListFiles()
 	if err != nil {
 		log.Printf("[ERROR] /api/admin/files - Failed to list files: %v", err)
 		respondError(w, http.StatusInternalServerError, "Failed to list files")
 		return
-	}
-
-	if files == nil {
-		files = []*usecase.FileInfo{}
 	}
 
 	respondJSON(w, http.StatusOK, files)
@@ -59,7 +43,7 @@ func (h *FilesHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.deleteUseCase.Execute(r.Context(), slug, filename)
+	err := storage.DeleteGameFile(slug, filename)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			log.Printf("[ERROR] /api/admin/files - File not found: %s/%s", slug, filename)
@@ -85,7 +69,7 @@ func (h *FilesHandler) Serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	absPath, err := h.serveUseCase.Execute(r.Context(), slug, filename)
+	absPath, err := storage.GameFilePath(slug, filename)
 	if err != nil {
 		log.Printf("[ERROR] /files - File not found: %s/%s: %v", slug, filename, err)
 		respondError(w, http.StatusNotFound, "File not found")

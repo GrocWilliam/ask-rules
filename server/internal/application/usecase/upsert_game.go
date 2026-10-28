@@ -29,6 +29,14 @@ type UpsertGameRequest struct {
 	Gameplay map[string]interface{} `json:"gameplay,omitempty"`
 }
 
+// GameDetailDTO est le jeu renvoyé après création ou mise à jour.
+type GameDetailDTO struct {
+	ID       string                 `json:"id"`
+	Name     string                 `json:"name"`
+	AddedAt  time.Time              `json:"added_at"`
+	Gameplay map[string]interface{} `json:"gameplay,omitempty"`
+}
+
 // Execute crée ou met à jour un jeu.
 func (uc *UpsertGameUseCase) Execute(ctx context.Context, req *UpsertGameRequest) (*GameDetailDTO, error) {
 	// Validation

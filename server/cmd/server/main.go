@@ -58,8 +58,6 @@ func main() {
 	// 4. Créer les use cases
 	// Game use cases
 	askUseCase := usecase.NewAskQuestionUseCase(gameRepo, retrieverSvc, llmSvc, cacheSvc, logRepo)
-	listGamesUseCase := usecase.NewListGamesUseCase(gameRepo)
-	getGameUseCase := usecase.NewGetGameUseCase(gameRepo)
 	upsertGameUseCase := usecase.NewUpsertGameUseCase(gameRepo)
 	deleteGameUseCase := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo, cacheSvc)
 	importGameUseCase := usecase.NewImportGameUseCase(gameRepo, sectionRepo, pipelineSvc, logRepo)
@@ -68,23 +66,15 @@ func main() {
 	// Admin use cases
 	adminAuthUseCase := usecase.NewAdminAuthUseCase(config.C.AdminPassword, logRepo)
 
-	// Logs use cases
-	getLogsUseCase := usecase.NewGetLogsUseCase(logRepo)
-
-	// Files use cases
-	listFilesUseCase := usecase.NewListFilesUseCase(config.C.UploadsDir)
-	deleteFileUseCase := usecase.NewDeleteFileUseCase(config.C.UploadsDir)
-	serveFileUseCase := usecase.NewServeFileUseCase(config.C.UploadsDir)
-
-	// 6. Créer les handlers HTTP
+	// 5. Créer les handlers HTTP
 	askHandler := handler.NewAskHandler(askUseCase)
-	gamesHandler := handler.NewGamesHandler(listGamesUseCase, getGameUseCase, upsertGameUseCase, deleteGameUseCase)
+	gamesHandler := handler.NewGamesHandler(gameRepo, upsertGameUseCase, deleteGameUseCase)
 	importHandler := handler.NewImportHandler(importGameUseCase, reprocessGameUseCase)
 	adminHandler := handler.NewAdminHandler(adminAuthUseCase)
-	logsHandler := handler.NewLogsHandler(getLogsUseCase)
-	filesHandler := handler.NewFilesHandler(listFilesUseCase, deleteFileUseCase, serveFileUseCase)
+	logsHandler := handler.NewLogsHandler(logRepo)
+	filesHandler := handler.NewFilesHandler()
 
-	// 7. Configurer le routeur Chi
+	// 6. Configurer le routeur Chi
 	r := router.NewRouter(&router.Config{
 		AskHandler:            askHandler,
 		GamesHandler:          gamesHandler,
@@ -97,21 +87,20 @@ func main() {
 		LLMWarmup:             llmSvc.Warmup,
 	})
 
-	// 8. Démarrer le serveur
+	// 7. Démarrer le serveur
 	addr := ":" + config.C.Port
 	fmt.Printf("🚀 Server starting on %s\n", addr)
 	fmt.Printf("📂 Uploads dir  : %s\n", config.C.UploadsDir)
 	fmt.Printf("🤖 Model path   : %s\n", config.C.ModelPath)
 	fmt.Printf("📊 Repositories: Game, Section, Log\n")
 	fmt.Printf("🔧 Services: ONNX Embedder, LLM, Hybrid Retriever, Redis Cache, Pipeline\n")
-	fmt.Printf("📝 Use Cases: Ask, Import, ListGames, GetGame, UpsertGame, DeleteGame, AdminAuth, GetLogs, ManageFiles\n")
+	fmt.Printf("📝 Use Cases: Ask, Import, Reprocess, UpsertGame, DeleteGame, AdminAuth\n")
 	fmt.Printf("🌐 Endpoints:\n")
 	fmt.Printf("  GET    /health                               - Health check\n")
 	fmt.Printf("  POST   /api/ask                              - Ask a question about a game\n")
 	fmt.Printf("  POST   /api/llm/warmup                       - Wake up the LLM in background\n")
 	fmt.Printf("  POST   /api/import                           - Import game files (SSE)\n")
 	fmt.Printf("  GET    /api/games                            - List all games\n")
-	fmt.Printf("  GET    /api/games/{id}                       - Get game details\n")
 	fmt.Printf("  GET    /files/{slug}/{filename}              - Serve uploaded files\n")
 	fmt.Printf("  POST   /api/admin/login                      - Admin login\n")
 	fmt.Printf("  POST   /api/admin/logout                     - Admin logout\n")

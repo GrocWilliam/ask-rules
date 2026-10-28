@@ -77,7 +77,6 @@ func NewRouter(cfg *Config) *chi.Mux {
 
 		// Consultation des jeux (avec timeout)
 		r.With(middleware.Timeout(30*time.Second)).Get("/games", cfg.GamesHandler.List)
-		r.With(middleware.Timeout(30*time.Second)).Get("/games/{id}", cfg.GamesHandler.Get)
 
 		// Routes d'administration
 		r.Route("/admin", func(r chi.Router) {

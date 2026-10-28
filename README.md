@@ -278,7 +278,6 @@ volumes:
 | `POST`  | `/api/ask`                 | Poser une question sur un jeu    |
 | `POST`  | `/api/ask/stream`          | Idem, réponse en streaming (SSE) |
 | `GET`   | `/api/games`               | Lister les jeux                  |
-| `GET`   | `/api/games/{id}`          | Détail d'un jeu                  |
 | `GET`   | `/files/{slug}/{filename}` | Servir un fichier uploadé        |
 
 **Body `/api/ask`** :
