@@ -18,11 +18,16 @@ const (
 	// rrfK : constante de Reciprocal Rank Fusion (valeur standard de la littérature).
 	rrfK = 60
 	// minCandidates : nombre minimum de candidats demandés à chaque recherche.
-	minCandidates = 20
-	// minVectorScore : similarité cosinus en dessous de laquelle un résultat
-	// uniquement vectoriel est écarté. E5 produit des cosinus élevés même pour
-	// des textes sans rapport (~0.7), le seuil ne filtre que le bruit évident.
-	minVectorScore = 0.72
+	// Une section bien classée dans une seule des deux listes doit pouvoir
+	// apparaître dans l'autre pour recevoir les deux votes RRF : à 20, une
+	// section 3e en vectoriel mais 28e en plein texte était écartée (cmd/eval).
+	minCandidates = 40
+	// defaultMinVectorScore : similarité cosinus en dessous de laquelle un
+	// résultat vectoriel est écarté (SearchOptions.MinVectorScore). E5 produit
+	// des cosinus élevés même pour des textes sans rapport (~0.7), le seuil ne
+	// filtre que le bruit évident. Il dépend du modèle : d'autres (Arctic,
+	// Bekko) donnent ~0.6 au meilleur résultat, 0.72 les écarterait tous.
+	defaultMinVectorScore = 0.72
 	// pageDecay : pénalité par page du score fusionné. La règle de référence
 	// est le plus souvent au début du livret, les pages suivantes la détaillent
 	// ou la répètent (exemples, résumé). 0.005 : page 10 ≈ -3 rangs, page 30 ≈ -9.
@@ -37,6 +42,9 @@ type SearchOptions struct {
 	Limit       int
 	Embedder    service.EmbedderService
 	SectionRepo repository.SectionRepository
+	// MinVectorScore : seuil de similarité des résultats vectoriels
+	// (0 : defaultMinVectorScore, négatif : aucun seuil).
+	MinVectorScore float64
 }
 
 // Search effectue une recherche hybride et retourne les sections les plus pertinentes.
@@ -84,7 +92,11 @@ func Search(ctx context.Context, opts SearchOptions) ([]entity.ScoredSection, er
 		}
 	}
 
-	merged := mergeResults(vectorResults, textResults, limit)
+	minScore := opts.MinVectorScore
+	if minScore == 0 {
+		minScore = defaultMinVectorScore
+	}
+	merged := mergeResults(vectorResults, textResults, limit, minScore)
 	return expandTop(ctx, opts.SectionRepo, merged), nil
 }
 
@@ -166,7 +178,7 @@ func buildSearchQuery(question string) string {
 // mergeResults fusionne les deux classements par Reciprocal Rank Fusion.
 // Les scores bruts (cosinus vs ts_rank) ne sont pas comparables : seul le rang
 // compte. Le score final est ramené dans [0, 1] (1 = premier dans les deux listes).
-func mergeResults(vecResults, textResults []entity.ScoredSection, limit int) []entity.ScoredSection {
+func mergeResults(vecResults, textResults []entity.ScoredSection, limit int, minVectorScore float64) []entity.ScoredSection {
 	scores := map[string]float64{}
 	sectionMap := map[string]entity.ScoredSection{}
 

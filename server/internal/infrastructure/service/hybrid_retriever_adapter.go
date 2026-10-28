@@ -8,6 +8,7 @@ import (
 	"ask-rules-server/internal/domain/repository"
 	"ask-rules-server/internal/domain/service"
 	"ask-rules-server/internal/domain/service/retriever"
+	"ask-rules-server/internal/infrastructure/config"
 )
 
 // HybridRetrieverAdapter adapte le package retriever existant à l'interface domaine.
@@ -28,11 +29,12 @@ func NewHybridRetriever(sectionRepo repository.SectionRepository, embedder servi
 func (r *HybridRetrieverAdapter) Search(ctx context.Context, req *service.SearchRequest) ([]*entity.ScoredSection, error) {
 	// Appeler le retriever existant
 	opts := retriever.SearchOptions{
-		GameID:      req.GameID,
-		Question:    req.Question,
-		Limit:       req.Limit,
-		Embedder:    r.embedder,
-		SectionRepo: r.sectionRepo,
+		GameID:         req.GameID,
+		Question:       req.Question,
+		Limit:          req.Limit,
+		Embedder:       r.embedder,
+		SectionRepo:    r.sectionRepo,
+		MinVectorScore: config.C.VectorMinScore,
 	}
 
 	results, err := retriever.Search(ctx, opts)

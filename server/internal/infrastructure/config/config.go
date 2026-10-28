@@ -38,6 +38,9 @@ type Config struct {
 	ModelPath string
 	// OnnxThreads : threads ONNX Runtime pour une inférence (peu = moins de RAM)
 	OnnxThreads int
+	// VectorMinScore : similarité cosinus minimale d'un résultat vectoriel.
+	// Propre au modèle d'embedding : 0.72 pour E5, plus bas pour d'autres.
+	VectorMinScore float64
 
 	Env string
 }
@@ -80,6 +83,7 @@ func Load() error {
 		UploadsDir:            getEnv("UPLOADS_DIR", "../uploads"),
 		ModelPath:             getEnv("MODEL_PATH", "../models/multilingual-e5-small"),
 		OnnxThreads:           getEnvInt("ONNX_THREADS", 2),
+		VectorMinScore:        getEnvFloat("VECTOR_MIN_SCORE", 0.72),
 		Env:                   getEnv("ENV", "production"),
 	}
 

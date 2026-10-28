@@ -20,7 +20,7 @@ func TestMergeResults_TextOnlyHitsAreKept(t *testing.T) {
 	vec := []entity.ScoredSection{sec("a", 0.85), sec("b", 0.80)}
 	text := []entity.ScoredSection{sec("c", 0.02)}
 
-	got := mergeResults(vec, text, 4)
+	got := mergeResults(vec, text, 4, defaultMinVectorScore)
 	if len(got) != 3 {
 		t.Fatalf("attendu 3 sections, obtenu %d", len(got))
 	}
@@ -30,14 +30,14 @@ func TestMergeResults_BothListsRankFirst(t *testing.T) {
 	vec := []entity.ScoredSection{sec("a", 0.90), sec("b", 0.88)}
 	text := []entity.ScoredSection{sec("b", 0.30), sec("a", 0.10)}
 
-	got := mergeResults(vec, text, 4)
+	got := mergeResults(vec, text, 4, defaultMinVectorScore)
 	if got[0].Score != got[1].Score {
 		t.Fatalf("a et b ont des rangs symétriques, scores attendus égaux : %v / %v", got[0].Score, got[1].Score)
 	}
 
 	vec = []entity.ScoredSection{sec("a", 0.90), sec("b", 0.88)}
 	text = []entity.ScoredSection{sec("a", 0.30)}
-	got = mergeResults(vec, text, 4)
+	got = mergeResults(vec, text, 4, defaultMinVectorScore)
 	if got[0].ID != "a" || got[0].Score != 1 {
 		t.Fatalf("a premier dans les deux listes : attendu score 1, obtenu %s=%v", got[0].ID, got[0].Score)
 	}
@@ -46,7 +46,7 @@ func TestMergeResults_BothListsRankFirst(t *testing.T) {
 func TestMergeResults_LowCosineDropped(t *testing.T) {
 	vec := []entity.ScoredSection{sec("a", 0.85), sec("noise", 0.60)}
 
-	got := mergeResults(vec, nil, 4)
+	got := mergeResults(vec, nil, 4, defaultMinVectorScore)
 	if len(got) != 1 || got[0].ID != "a" {
 		t.Fatalf("le résultat vectoriel sous le seuil doit être écarté : %+v", got)
 	}
@@ -54,7 +54,7 @@ func TestMergeResults_LowCosineDropped(t *testing.T) {
 
 func TestMergeResults_Limit(t *testing.T) {
 	vec := []entity.ScoredSection{sec("a", 0.9), sec("b", 0.9), sec("c", 0.9)}
-	if got := mergeResults(vec, nil, 2); len(got) != 2 {
+	if got := mergeResults(vec, nil, 2, defaultMinVectorScore); len(got) != 2 {
 		t.Fatalf("attendu 2 sections, obtenu %d", len(got))
 	}
 }
@@ -64,7 +64,7 @@ func TestMergeResults_EarlierPageWinsCloseRanks(t *testing.T) {
 	late, early := sec("late", 0.9), sec("early", 0.89)
 	late.PageStart, early.PageStart = p(20), p(3)
 
-	got := mergeResults([]entity.ScoredSection{late, early}, nil, 4)
+	got := mergeResults([]entity.ScoredSection{late, early}, nil, 4, defaultMinVectorScore)
 	if got[0].ID != "early" {
 		t.Fatalf("à rangs voisins, la page la plus tôt doit passer devant : %+v", got)
 	}
@@ -78,7 +78,7 @@ func TestMergeResults_EarlierPageWinsCloseRanks(t *testing.T) {
 	}
 	early.Score = 0.80
 	vec = append(vec, early)
-	if got := mergeResults(vec, nil, 20); got[0].ID != "late" {
+	if got := mergeResults(vec, nil, 20, defaultMinVectorScore); got[0].ID != "late" {
 		t.Fatalf("la page ne doit pas écraser un meilleur rang : premier %s", got[0].ID)
 	}
 }
