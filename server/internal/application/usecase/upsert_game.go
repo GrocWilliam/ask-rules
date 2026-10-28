@@ -3,6 +3,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -35,26 +36,23 @@ func (uc *UpsertGameUseCase) Execute(ctx context.Context, req *UpsertGameRequest
 		return nil, entity.ErrInvalidGameName
 	}
 
-	// Créer l'entité
-	now := time.Now()
-	game := &entity.Game{
-		ID:       req.ID,
-		Name:     req.Name,
-		Gameplay: req.Gameplay,
+	id := req.ID
+	if id == "" {
+		id = generateGameID(req.Name)
 	}
 
-	// Si c'est une création (pas d'ID), générer un ID
-	if game.ID == "" {
-		game.ID = generateGameID(req.Name)
-		game.AddedAt = now
-	} else {
-		// Si mise à jour, récupérer AddedAt existant
-		existing, err := uc.gameRepo.FindByID(ctx, game.ID)
-		if err == nil && existing != nil {
-			game.AddedAt = existing.AddedAt
-		} else {
-			game.AddedAt = now
+	// Mise à jour : partir du jeu existant, Save réécrit toutes les colonnes
+	// (sinon fichiers, métadonnées et statistiques seraient effacés)
+	game, err := uc.gameRepo.FindByID(ctx, id)
+	if err != nil {
+		if !errors.Is(err, entity.ErrGameNotFound) {
+			return nil, fmt.Errorf("failed to find game: %w", err)
 		}
+		game = &entity.Game{ID: id, AddedAt: time.Now()}
+	}
+	game.Name = req.Name
+	if req.Gameplay != nil {
+		game.Gameplay = req.Gameplay
 	}
 
 	// Sauvegarder

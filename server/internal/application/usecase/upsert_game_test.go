@@ -178,3 +178,37 @@ func TestUpsertGameUseCase_Execute_SaveError(t *testing.T) {
 		t.Errorf("Expected nil result on error, got: %+v", result)
 	}
 }
+
+// Test : la mise à jour conserve les fichiers, métadonnées et statistiques
+func TestUpsertGameUseCase_Execute_UpdateKeepsExistingFields(t *testing.T) {
+	var savedGame *entity.Game
+	gameRepo := &mockGameRepo{
+		findByIDFunc: func(ctx context.Context, id string) (*entity.Game, error) {
+			return &entity.Game{
+				ID:       "catan",
+				Name:     "Catan",
+				FilePath: "catan/old.pdf",
+				Metadata: map[string]interface{}{"players": "3-4"},
+				Stats:    map[string]interface{}{"files": []interface{}{"catan/regles.pdf"}},
+				Gameplay: map[string]interface{}{"phases": 2},
+			}, nil
+		},
+		saveFunc: func(ctx context.Context, game *entity.Game) error {
+			savedGame = game
+			return nil
+		},
+	}
+
+	uc := usecase.NewUpsertGameUseCase(gameRepo)
+	if _, err := uc.Execute(context.Background(), &usecase.UpsertGameRequest{ID: "catan", Name: "Catan (2e éd.)"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if savedGame.Name != "Catan (2e éd.)" {
+		t.Errorf("Name = %q", savedGame.Name)
+	}
+	if savedGame.FilePath != "catan/old.pdf" || savedGame.Metadata["players"] != "3-4" ||
+		savedGame.Stats["files"] == nil || savedGame.Gameplay["phases"] != 2 {
+		t.Errorf("champs existants perdus : %+v", savedGame)
+	}
+}
