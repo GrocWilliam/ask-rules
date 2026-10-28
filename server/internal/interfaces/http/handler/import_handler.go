@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"sync"
@@ -41,14 +44,14 @@ func NewImportHandler(importUseCase *usecase.ImportGameUseCase, reprocessUseCase
 }
 
 // downloadAndSaveFromURL télécharge un fichier depuis une URL et le sauvegarde dans UPLOADS_DIR/{slug}/
-func downloadAndSaveFromURL(url string, slug string) (string, string, error) {
+func downloadAndSaveFromURL(rawURL string, slug string) (string, string, error) {
 	// Télécharger le fichier
 	client := &http.Client{
 		Timeout: 60 * time.Second,
 	}
 
 	// Créer la requête avec un User-Agent pour éviter les blocages
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to create request: %w", err)
 	}
@@ -65,12 +68,24 @@ func downloadAndSaveFromURL(url string, slug string) (string, string, error) {
 	}
 
 	log.Printf("[INFO] downloadAndSaveFromURL - Downloading from %s (Content-Type: %s, Content-Length: %s)",
-		url, resp.Header.Get("Content-Type"), resp.Header.Get("Content-Length"))
+		rawURL, resp.Header.Get("Content-Type"), resp.Header.Get("Content-Length"))
 
-	// Nom de fichier fourni par le serveur distant : nettoyé par storage
-	// (pas de « ../ »), et taille plafonnée comme pour un upload
-	filename := extractFilenameFromURL(url, resp)
-	filePath, size, err := storage.SaveFile(io.LimitReader(resp.Body, maxUploadSize+1), filename, slug)
+	// Taille plafonnée comme pour un upload
+	body := bufio.NewReader(io.LimitReader(resp.Body, maxUploadSize+1))
+
+	// L'extension vient du contenu, pas des en-têtes : un PDF servi en
+	// application/octet-stream sans extension dans l'URL serait sinon indexé
+	// comme du texte brut
+	head, _ := body.Peek(512)
+	name := extractFilenameFromURL(rawURL, resp)
+	ext, err := sniffExtension(head, name)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Nom de fichier fourni par le serveur distant : nettoyé par storage (pas de « ../ »)
+	filename := strings.TrimSuffix(name, path.Ext(name)) + ext
+	filePath, size, err := storage.SaveFile(body, filename, slug)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to save file: %w", err)
 	}
@@ -86,60 +101,36 @@ func downloadAndSaveFromURL(url string, slug string) (string, string, error) {
 	return filePath, path.Base(filePath), nil
 }
 
-// extractFilenameFromURL extrait le nom du fichier depuis l'URL ou les headers
-func extractFilenameFromURL(url string, resp *http.Response) string {
-	// 1. Essayer Content-Disposition header
-	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
-		if strings.Contains(cd, "filename=") {
-			parts := strings.Split(cd, "filename=")
-			if len(parts) > 1 {
-				filename := strings.Trim(parts[1], `"`)
-				if filename != "" {
-					return filename
-				}
-			}
+// extractFilenameFromURL extrait le nom du fichier depuis l'en-tête
+// Content-Disposition ou l'URL (l'extension est ensuite fixée par sniffExtension).
+func extractFilenameFromURL(rawURL string, resp *http.Response) string {
+	// filename* (RFC 5987) est décodé par ParseMediaType dans params["filename"]
+	if _, params, err := mime.ParseMediaType(resp.Header.Get("Content-Disposition")); err == nil && params["filename"] != "" {
+		return params["filename"]
+	}
+	if u, err := url.Parse(rawURL); err == nil {
+		if name := path.Base(u.Path); name != "/" && name != "." {
+			return name
 		}
 	}
-
-	// 2. Extraire depuis l'URL
-	urlPath := url
-	if idx := strings.LastIndex(urlPath, "/"); idx != -1 {
-		urlPath = urlPath[idx+1:]
-	}
-	if idx := strings.Index(urlPath, "?"); idx != -1 {
-		urlPath = urlPath[:idx]
-	}
-
-	// 3. Si pas d'extension, utiliser Content-Type
-	if !strings.Contains(urlPath, ".") {
-		contentType := resp.Header.Get("Content-Type")
-		ext := getExtensionFromContentType(contentType)
-		if urlPath == "" {
-			urlPath = "downloaded-file" + ext
-		} else {
-			urlPath = urlPath + ext
-		}
-	}
-
-	if urlPath == "" {
-		return "downloaded-file.pdf"
-	}
-
-	return urlPath
+	return "downloaded-file"
 }
 
-// getExtensionFromContentType retourne l'extension basée sur le Content-Type
-func getExtensionFromContentType(contentType string) string {
-	contentType = strings.ToLower(strings.Split(contentType, ";")[0])
-	switch contentType {
-	case "application/pdf":
-		return ".pdf"
-	case "text/plain":
-		return ".txt"
-	case "text/html":
-		return ".html"
+// sniffExtension retourne l'extension d'après le début du contenu : .pdf, ou
+// pour du texte brut celle du nom (.md) ou .txt. Les autres formats (HTML…)
+// ne sont pas indexables.
+func sniffExtension(head []byte, name string) (string, error) {
+	contentType := http.DetectContentType(head)
+	switch {
+	case contentType == "application/pdf":
+		return ".pdf", nil
+	case strings.HasPrefix(contentType, "text/plain"):
+		if strings.EqualFold(path.Ext(name), ".md") {
+			return ".md", nil
+		}
+		return ".txt", nil
 	default:
-		return ".txt"
+		return "", fmt.Errorf("format non supporté (%s) : PDF, TXT ou Markdown attendu", contentType)
 	}
 }
 
