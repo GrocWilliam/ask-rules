@@ -75,12 +75,19 @@ func (p *PipelineAdapter) run(ctx context.Context, gameName string, filePaths []
 	var gameplayChunks []string
 	var metaChunks []string
 
+	var fileErr error
 	for _, fp := range filePaths {
-		chunkCount := p.processFileStreaming(ctx, game, fp, emit, &totalChunks, &gameplayChunks, &metaChunks, maxChunksForGameplay)
-		if chunkCount < 0 {
-			emit("file_error", map[string]interface{}{"file": fp, "error": "Erreur traitement fichier"})
-			continue
+		if err := p.processFileStreaming(ctx, game, fp, emit, &totalChunks, &gameplayChunks, &metaChunks, maxChunksForGameplay); err != nil {
+			fileErr = fmt.Errorf("%s : %w", filepath.Base(fp), err)
+			emit("file_error", map[string]interface{}{"file": fp, "error": err.Error()})
 		}
+	}
+	// Rien d'indexé : l'appelant garde les sections précédentes du jeu
+	if totalChunks == 0 {
+		if fileErr != nil {
+			return fmt.Errorf("aucune section indexée (%w)", fileErr)
+		}
+		return fmt.Errorf("aucune section indexée")
 	}
 
 	// ── Extraction des métadonnées du jeu ─────────────────────────────────────
@@ -129,7 +136,8 @@ func (p *PipelineAdapter) run(ctx context.Context, gameName string, filePaths []
 	return nil
 }
 
-// processFileStreaming traite un fichier en streaming.
+// processFileStreaming traite un fichier en streaming. Retourne une erreur si
+// le texte du fichier n'a pas pu être extrait.
 func (p *PipelineAdapter) processFileStreaming(
 	ctx context.Context,
 	game *entity.Game,
@@ -139,20 +147,20 @@ func (p *PipelineAdapter) processFileStreaming(
 	gameplayChunks *[]string,
 	metaChunks *[]string,
 	maxChunks int,
-) int {
+) error {
 	absPath := storage.GetAbsolutePath(fp)
 
 	emit("extracting", map[string]interface{}{"file": fp})
 	pages, err := extractText(absPath)
 	if err != nil {
-		return -1
+		return err
 	}
 	textLength := 0
 	for _, pg := range pages {
 		textLength += len(pg.Text)
 	}
 	if textLength == 0 {
-		return -1
+		return fmt.Errorf("aucun texte extrait (PDF scanné ?)")
 	}
 
 	emit("chunking", map[string]interface{}{"file": fp, "text_length": textLength})
@@ -161,11 +169,10 @@ func (p *PipelineAdapter) processFileStreaming(
 
 	emit("embedding", map[string]interface{}{"file": fp, "chunks": len(chunks)})
 
-	processedCount := 0
 	for i, chunk := range chunks {
 		select {
 		case <-ctx.Done():
-			return processedCount
+			return ctx.Err()
 		default:
 		}
 
@@ -213,7 +220,6 @@ func (p *PipelineAdapter) processFileStreaming(
 			emit("section_error", map[string]interface{}{"index": i, "error": err.Error()})
 		} else {
 			*total++
-			processedCount++
 
 			if len(*metaChunks) < 5 {
 				*metaChunks = append(*metaChunks, cleanText)
@@ -230,7 +236,7 @@ func (p *PipelineAdapter) processFileStreaming(
 		}
 	}
 
-	return processedCount
+	return nil
 }
 
 // gameplayDataToMap convertit GameplayData en map via JSON.

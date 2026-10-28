@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"ask-rules-server/internal/application/usecase"
 	"ask-rules-server/internal/domain/entity"
@@ -156,5 +157,38 @@ func TestAskQuestionUseCase_Execute_CacheHit(t *testing.T) {
 
 	if resp1.Answer != resp2.Answer {
 		t.Error("Cached response should match original")
+	}
+}
+
+// Test : une réindexation (date_update modifiée) invalide les réponses en cache
+func TestAskQuestionUseCase_CacheInvalidatedByReindex(t *testing.T) {
+	game := &entity.Game{ID: "game-1", Name: "Wingspan", UpdatedAt: time.Unix(1000, 0)}
+	gameRepo := &mockGameRepo{
+		findByNameFunc: func(ctx context.Context, name string) (*entity.Game, error) {
+			g := *game
+			return &g, nil
+		},
+	}
+	retriever := &mockRetriever{
+		searchFunc: func(ctx context.Context, req *service.SearchRequest) ([]*entity.ScoredSection, error) {
+			return []*entity.ScoredSection{{ID: "s1", GameID: "game-1", Title: "Setup", Text: "..."}}, nil
+		},
+	}
+	uc := usecase.NewAskQuestionUseCase(gameRepo, retriever, &mockLLM{}, newMockCache(), &mockLogRepo{})
+	ask := func() *usecase.AskResponse {
+		resp, err := uc.Execute(context.Background(), &usecase.AskRequest{GameName: "Wingspan", Question: "Setup ?"})
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		return resp
+	}
+
+	ask()
+	if !ask().Cached {
+		t.Fatal("la deuxième question identique doit venir du cache")
+	}
+	game.UpdatedAt = time.Unix(2000, 0)
+	if ask().Cached {
+		t.Error("après réindexation, la réponse ne doit plus venir du cache")
 	}
 }

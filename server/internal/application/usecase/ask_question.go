@@ -116,7 +116,7 @@ func (uc *AskQuestionUseCase) ExecuteStream(ctx context.Context, req *AskRequest
 	// 3. Vérifier le cache — uniquement pour une première question : avec un
 	// historique, la réponse dépend de la conversation
 	useCache := len(history) == 0
-	cacheKey := uc.buildCacheKey(game.ID, req.Question)
+	cacheKey := uc.buildCacheKey(game, req.Question)
 	if useCache {
 		if cached, err := uc.cache.Get(ctx, cacheKey); err == nil && cached != nil {
 			// Convertir map[string]interface{} en *AskResponse via JSON
@@ -320,10 +320,12 @@ func interleave(a, b []*entity.ScoredSection, limit int) []*entity.ScoredSection
 	return result
 }
 
-// buildCacheKey génère une clé de cache unique pour la question.
-func (uc *AskQuestionUseCase) buildCacheKey(gameID, question string) string {
+// buildCacheKey génère une clé de cache unique pour la question. date_update
+// en fait partie : réimporter ou reprocesser le jeu la met à jour, les
+// réponses calculées sur les anciennes sections ne sont plus servies.
+func (uc *AskQuestionUseCase) buildCacheKey(game *entity.Game, question string) string {
 	normalized := strings.ToLower(strings.TrimSpace(question))
-	hash := sha256.Sum256([]byte(gameID + ":" + normalized))
+	hash := sha256.Sum256(fmt.Appendf(nil, "%s:%d:%s", game.ID, game.UpdatedAt.UnixNano(), normalized))
 	return "ask:" + hex.EncodeToString(hash[:])
 }
 

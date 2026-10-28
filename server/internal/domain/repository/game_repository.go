@@ -30,4 +30,8 @@ type GameRepository interface {
 
 	// UpdateGameplay met à jour uniquement le champ gameplay d'un jeu.
 	UpdateGameplay(ctx context.Context, id string, gameplay map[string]interface{}) error
+
+	// Touch met à jour date_update (règles réindexées) : les réponses en
+	// cache, dont la clé en dépend, ne sont plus servies.
+	Touch(ctx context.Context, id string) error
 }

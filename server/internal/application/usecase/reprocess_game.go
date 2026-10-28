@@ -82,20 +82,10 @@ func (uc *ReprocessGameUseCase) Execute(ctx context.Context, req *ReprocessReque
 		"files": len(filePaths),
 	})
 
-	// 3. Supprimer les sections existantes
-	emit("replacing", map[string]interface{}{"game": game.Name})
-	if err := uc.sectionRepo.DeleteByGameID(ctx, game.ID); err != nil {
-		log.Printf("[ERROR] ReprocessGame - Failed to delete sections for game '%s': %v", game.Name, err)
-		return fmt.Errorf("failed to delete existing sections: %w", err)
-	}
-
-	// 4. Relancer le pipeline
+	// 3. Relancer le pipeline ; les sections existantes ne sont remplacées
+	// qu'une fois l'indexation réussie
 	start := time.Now()
-	if err := uc.pipeline.Process(ctx, &ImportOptions{
-		GameName:  game.Name,
-		FilePaths: filePaths,
-		OnEvent:   mapPipelineEvents(emit),
-	}); err != nil {
+	if err := uc.reindex(ctx, game, filePaths, emit); err != nil {
 		log.Printf("[ERROR] ReprocessGame - Pipeline failed for game '%s': %v", game.Name, err)
 		return fmt.Errorf("pipeline failed: %w", err)
 	}
@@ -207,22 +197,9 @@ func (uc *ReprocessGameUseCase) ExecuteAll(ctx context.Context, gameIDs []string
 			continue
 		}
 
-		// Supprimer les sections existantes
-		if err := uc.sectionRepo.DeleteByGameID(ctx, game.ID); err != nil {
-			log.Printf("[ERROR] ReprocessAll - Failed to delete sections for '%s': %v", game.Name, err)
-			emit("game_error", map[string]interface{}{
-				"game":  game.Name,
-				"error": err.Error(),
-			})
-			continue
-		}
-
-		// Relancer le pipeline en relayant les événements
-		pipelineErr := uc.pipeline.Process(ctx, &ImportOptions{
-			GameName:  game.Name,
-			FilePaths: filePaths,
-			OnEvent:   mapPipelineEvents(emit),
-		})
+		// Relancer le pipeline en relayant les événements ; les sections
+		// existantes ne sont remplacées qu'une fois l'indexation réussie
+		pipelineErr := uc.reindex(ctx, game, filePaths, emit)
 
 		if pipelineErr != nil {
 			log.Printf("[ERROR] ReprocessAll - Pipeline failed for '%s': %v", game.Name, pipelineErr)
@@ -266,6 +243,18 @@ func (uc *ReprocessGameUseCase) ExecuteAll(ctx context.Context, gameIDs []string
 		"success":  successes,
 		"total":    total,
 		"duration": duration.Milliseconds(),
+	})
+}
+
+// reindex relance le pipeline sur filePaths et remplace les sections du jeu
+// en cas de succès (voir la fonction reindex).
+func (uc *ReprocessGameUseCase) reindex(ctx context.Context, game *entity.Game, filePaths []string, emit func(string, map[string]interface{})) error {
+	return reindex(ctx, uc.gameRepo, uc.sectionRepo, game, true, emit, func() error {
+		return uc.pipeline.Process(ctx, &ImportOptions{
+			GameName:  game.Name,
+			FilePaths: filePaths,
+			OnEvent:   mapPipelineEvents(emit),
+		})
 	})
 }
 

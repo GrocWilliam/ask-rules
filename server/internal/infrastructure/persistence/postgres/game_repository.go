@@ -189,3 +189,17 @@ func (r *GameRepositoryImpl) UpdateGameplay(ctx context.Context, id string, game
 
 	return nil
 }
+
+// Touch met à jour date_update (règles réindexées).
+func (r *GameRepositoryImpl) Touch(ctx context.Context, id string) error {
+	result, err := r.pool.Exec(ctx, `UPDATE games SET date_update = NOW() WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return entity.ErrGameNotFound
+	}
+
+	return nil
+}

@@ -71,6 +71,24 @@ func (r *SectionRepositoryImpl) DeleteByGameID(ctx context.Context, gameID strin
 	return err
 }
 
+// ListIDsByGameID retourne les IDs des sections d'un jeu.
+func (r *SectionRepositoryImpl) ListIDsByGameID(ctx context.Context, gameID string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT id FROM sections WHERE game_id = $1`, gameID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+// DeleteByIDs supprime les sections dont l'ID est dans ids.
+func (r *SectionRepositoryImpl) DeleteByIDs(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `DELETE FROM sections WHERE id = ANY($1)`, ids)
+	return err
+}
+
 // scoredColumns : colonnes lues par scanScored, suivies du score.
 const scoredColumns = `id, game_id, titre, type_section, contenu, resume,
 		       page_debut, page_fin, fichier_source, hierarchy_path, chunk_index`

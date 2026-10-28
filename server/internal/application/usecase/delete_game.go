@@ -60,7 +60,8 @@ func (uc *DeleteGameUseCase) Execute(ctx context.Context, gameID string) error {
 	// 4. Supprimer les fichiers : sinon ils restent téléchargeables via /files/
 	storage.DeleteGameFiles(toStringSlice(game.Stats["files"]))
 
-	// Le cache n'est pas invalidé (il faudrait un SCAN Redis) : il expire en 24h
+	// Cache : la clé dépend de date_update, un jeu réimporté sous le même ID
+	// ne retrouve donc pas les anciennes réponses
 
 	return nil
 }

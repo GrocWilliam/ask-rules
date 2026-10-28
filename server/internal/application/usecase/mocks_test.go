@@ -4,7 +4,9 @@ package usecase_test
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
+	"ask-rules-server/internal/application/usecase"
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/service"
 )
@@ -17,6 +19,7 @@ type mockGameRepo struct {
 	saveFunc           func(ctx context.Context, game *entity.Game) error
 	deleteFunc         func(ctx context.Context, id string) error
 	updateGameplayFunc func(ctx context.Context, id string, gameplay map[string]interface{}) error
+	touched            []string
 }
 
 func (m *mockGameRepo) FindByID(ctx context.Context, id string) (*entity.Game, error) {
@@ -61,12 +64,19 @@ func (m *mockGameRepo) UpdateGameplay(ctx context.Context, id string, gameplay m
 	return nil
 }
 
+func (m *mockGameRepo) Touch(ctx context.Context, id string) error {
+	m.touched = append(m.touched, id)
+	return nil
+}
+
 // Mock SectionRepository
 type mockSectionRepo struct {
 	insertFunc         func(ctx context.Context, section *entity.Section) error
 	deleteByGameIDFunc func(ctx context.Context, gameID string) error
 	vectorSearchFunc   func(ctx context.Context, gameID string, embedding []float64, limit int) ([]*entity.ScoredSection, error)
 	fullTextSearchFunc func(ctx context.Context, gameID, query string, limit int) ([]*entity.ScoredSection, error)
+	// ids : IDs des sections présentes (ListIDsByGameID, DeleteByIDs), tous jeux confondus
+	ids []string
 }
 
 func (m *mockSectionRepo) Insert(ctx context.Context, section *entity.Section) error {
@@ -80,6 +90,15 @@ func (m *mockSectionRepo) DeleteByGameID(ctx context.Context, gameID string) err
 	if m.deleteByGameIDFunc != nil {
 		return m.deleteByGameIDFunc(ctx, gameID)
 	}
+	return nil
+}
+
+func (m *mockSectionRepo) ListIDsByGameID(ctx context.Context, gameID string) ([]string, error) {
+	return slices.Clone(m.ids), nil
+}
+
+func (m *mockSectionRepo) DeleteByIDs(ctx context.Context, ids []string) error {
+	m.ids = slices.DeleteFunc(m.ids, func(id string) bool { return slices.Contains(ids, id) })
 	return nil
 }
 
@@ -177,12 +196,12 @@ func (m *mockCache) Invalidate(ctx context.Context, key string) error {
 
 // Mock PipelineService
 type mockPipeline struct {
-	processFunc func(ctx context.Context, gameID, gameName string, filePaths []string, onEvent func(string, map[string]interface{})) error
+	processFunc func(ctx context.Context, opts *usecase.ImportOptions) error
 }
 
-func (m *mockPipeline) ProcessFiles(ctx context.Context, gameID, gameName string, filePaths []string, onEvent func(string, map[string]interface{})) error {
+func (m *mockPipeline) Process(ctx context.Context, opts *usecase.ImportOptions) error {
 	if m.processFunc != nil {
-		return m.processFunc(ctx, gameID, gameName, filePaths, onEvent)
+		return m.processFunc(ctx, opts)
 	}
 	return nil
 }

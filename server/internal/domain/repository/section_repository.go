@@ -15,6 +15,12 @@ type SectionRepository interface {
 	// DeleteByGameID supprime toutes les sections d'un jeu.
 	DeleteByGameID(ctx context.Context, gameID string) error
 
+	// ListIDsByGameID retourne les IDs des sections d'un jeu.
+	ListIDsByGameID(ctx context.Context, gameID string) ([]string, error)
+
+	// DeleteByIDs supprime les sections dont l'ID est dans ids.
+	DeleteByIDs(ctx context.Context, ids []string) error
+
 	// VectorSearch effectue une recherche sémantique par embedding.
 	// Retourne les sections les plus similaires triées par score décroissant.
 	VectorSearch(ctx context.Context, gameID string, embedding []float64, limit int) ([]*entity.ScoredSection, error)

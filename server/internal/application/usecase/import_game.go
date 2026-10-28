@@ -129,46 +129,43 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 		game.Stats = make(map[string]interface{})
 	}
 	// En mode merge, conserver les fichiers existants ; en mode replace, remplacer
+	previousFiles := toStringSlice(game.Stats["files"])
+	replace := isNew || req.Mode != "merge"
 	var replaced []string
-	if !isNew && req.Mode == "merge" {
-		existing := toStringSlice(game.Stats["files"])
-		game.Stats["files"] = mergeUnique(existing, filePaths)
-	} else {
-		for _, f := range toStringSlice(game.Stats["files"]) {
+	if replace {
+		for _, f := range previousFiles {
 			if !slices.Contains(filePaths, f) {
 				replaced = append(replaced, f)
 			}
 		}
 		game.Stats["files"] = filePaths
+	} else {
+		game.Stats["files"] = mergeUnique(previousFiles, filePaths)
 	}
+	// Le pipeline retrouve le jeu en base : il doit être enregistré avant
 	if err := uc.gameRepo.Save(ctx, game); err != nil {
 		log.Printf("[ERROR] ImportGame - Failed to save game '%s': %v", req.GameName, err)
 		return fmt.Errorf("failed to save game: %w", err)
 	}
-	// Anciens fichiers remplacés : sinon ils restent téléchargeables via /files/
-	storage.DeleteGameFiles(replaced)
 
-	// Si mode "replace", supprimer les sections existantes
-	if !isNew && req.Mode == "replace" {
-		emit("replacing", map[string]interface{}{"game": req.GameName})
-		if err := uc.sectionRepo.DeleteByGameID(ctx, game.ID); err != nil {
-			log.Printf("[ERROR] ImportGame - Failed to delete existing sections for game '%s': %v", req.GameName, err)
-			return fmt.Errorf("failed to delete existing sections: %w", err)
-		}
-	}
-
-	// Lancer le pipeline d'extraction et d'indexation
+	// Lancer le pipeline d'extraction et d'indexation ; les anciennes sections
+	// ne sont remplacées qu'une fois l'indexation réussie
 	start := time.Now()
-	err := uc.pipeline.Process(ctx, &ImportOptions{
-		GameName:  req.GameName,
-		FilePaths: filePaths,
-		OnEvent:   emit,
+	err := reindex(ctx, uc.gameRepo, uc.sectionRepo, game, replace, emit, func() error {
+		return uc.pipeline.Process(ctx, &ImportOptions{
+			GameName:  req.GameName,
+			FilePaths: filePaths,
+			OnEvent:   emit,
+		})
 	})
-
 	if err != nil {
 		log.Printf("[ERROR] ImportGame - Pipeline failed for game '%s': %v", req.GameName, err)
+		uc.rollback(ctx, game, isNew, previousFiles, filePaths)
 		return fmt.Errorf("pipeline failed: %w", err)
 	}
+
+	// Anciens fichiers remplacés : sinon ils restent téléchargeables via /files/
+	storage.DeleteGameFiles(replaced)
 
 	// Forcer garbage collection après import (libérer RAM)
 	runtime.GC()
@@ -197,6 +194,35 @@ func (uc *ImportGameUseCase) Execute(ctx context.Context, req *ImportRequest) er
 	})
 
 	return nil
+}
+
+// rollback remet le jeu dans son état d'avant un import échoué : un nouveau
+// jeu est supprimé, un jeu existant retrouve sa liste de fichiers. Les
+// fichiers ajoutés par l'import sont supprimés ; un fichier de même nom qu'un
+// ancien l'a écrasé à l'upload et reste en place.
+func (uc *ImportGameUseCase) rollback(ctx context.Context, game *entity.Game, isNew bool, previousFiles, filePaths []string) {
+	if isNew {
+		if err := uc.gameRepo.Delete(ctx, game.ID); err != nil {
+			log.Printf("[ERROR] ImportGame - Failed to remove new game '%s' after failure: %v", game.Name, err)
+		}
+	} else {
+		if len(previousFiles) > 0 {
+			game.Stats["files"] = previousFiles
+		} else {
+			delete(game.Stats, "files")
+		}
+		if err := uc.gameRepo.Save(ctx, game); err != nil {
+			log.Printf("[ERROR] ImportGame - Failed to restore files of game '%s': %v", game.Name, err)
+		}
+	}
+
+	var added []string
+	for _, f := range filePaths {
+		if !slices.Contains(previousFiles, f) {
+			added = append(added, f)
+		}
+	}
+	storage.DeleteGameFiles(added)
 }
 
 // mergeUnique fusionne deux slices en éliminant les doublons.
