@@ -25,7 +25,7 @@
 //     entier : « 3 » ne trouve pas « 13 ».
 //   - history (optionnel) : échanges précédents, pour une question de suivi.
 //
-// La recherche et le contexte sont ceux de /api/ask (usecase.RetrieveContext) ;
+// La recherche et le contexte sont ceux de /api/ask (ask.Service.RetrieveContext) ;
 // le LLM est appelé directement, sans cache.
 //
 // Attention : -index supprime et recrée les sections des jeux du dataset.
@@ -49,14 +49,13 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"ask-rules-server/internal/application/usecase"
-	"ask-rules-server/internal/domain/entity"
-	"ask-rules-server/internal/domain/repository"
-	"ask-rules-server/internal/domain/service/retriever"
-	"ask-rules-server/internal/infrastructure/config"
-	"ask-rules-server/internal/infrastructure/persistence/db"
-	postgresRepo "ask-rules-server/internal/infrastructure/persistence/postgres"
-	infraService "ask-rules-server/internal/infrastructure/service"
+	"ask-rules-server/internal/ask"
+	"ask-rules-server/internal/config"
+	"ask-rules-server/internal/embed"
+	"ask-rules-server/internal/index"
+	"ask-rules-server/internal/llm"
+	"ask-rules-server/internal/search"
+	"ask-rules-server/internal/store"
 )
 
 type dataset struct {
@@ -68,11 +67,11 @@ type dataset struct {
 }
 
 type question struct {
-	Game     string            `json:"game"`
-	Question string            `json:"question"`
-	History  []entity.ChatTurn `json:"history,omitempty"`
-	Expected []string          `json:"expected"`         // extraits dont l'un doit figurer dans une section renvoyée
-	Answer   []string          `json:"answer,omitempty"` // faits attendus dans la réponse, variantes séparées par « | »
+	Game     string         `json:"game"`
+	Question string         `json:"question"`
+	History  []llm.ChatTurn `json:"history,omitempty"`
+	Expected []string       `json:"expected"`         // extraits dont l'un doit figurer dans une section renvoyée
+	Answer   []string       `json:"answer,omitempty"` // faits attendus dans la réponse, variantes séparées par « | »
 }
 
 // outOfBook : la réponse n'est pas dans le livret, le LLM doit le dire.
@@ -108,7 +107,7 @@ type result struct {
 	Tokens       int      `json:"tokens,omitempty"`
 }
 
-// candidateLimit : nombre de candidates demandées par /api/ask (usecase.search).
+// candidateLimit : nombre de candidates demandées par /api/ask (ask.Service.search).
 const candidateLimit = 6
 
 // maxWords : longueur max d'une réponse demandée par le prompt (liste comprise).
@@ -143,29 +142,29 @@ func main() {
 	}
 
 	ctx := context.Background()
-	if err := db.Connect(); err != nil {
+	if err := store.Connect(); err != nil {
 		log.Fatalf("connexion base : %v", err)
 	}
-	defer db.Close()
+	defer store.Close()
 
-	gameRepo := postgresRepo.NewGameRepository(db.Pool)
-	sectionRepo := postgresRepo.NewSectionRepository(db.Pool)
-	embedder := infraService.NewONNXEmbedder()
-	llm := infraService.NewLLM()
+	gameRepo := store.NewGameRepository(store.Pool)
+	sectionRepo := store.NewSectionRepository(store.Pool)
+	embedder := embed.New()
+	llmClient := llm.New()
 
 	if *withLLM {
 		if config.C.LLM.BaseURL == "" {
 			log.Fatal("-llm : aucun LLM configuré (LLM_BASE_URL)")
 		}
-		llm.Warmup() // réveille le LLM pendant l'indexation et le retrieval
+		llmClient.Warmup() // réveille le LLM pendant l'indexation et le retrieval
 	}
 
 	// Sans -index, l'évaluation n'écrit rien en base
 	if *doIndex {
-		if err := db.Migrate(ctx); err != nil {
+		if err := store.Migrate(ctx); err != nil {
 			log.Fatalf("migration : %v", err)
 		}
-		pipeline := infraService.NewPipeline(gameRepo, sectionRepo, embedder)
+		pipeline := index.NewPipeline(gameRepo, sectionRepo, embedder)
 		for _, g := range ds.Games {
 			start := time.Now()
 			if err := indexGame(ctx, gameRepo, sectionRepo, pipeline, g.Name, g.Files); err != nil {
@@ -197,27 +196,27 @@ func main() {
 	}
 
 	// Avec -model, la recherche vectorielle utilise les vecteurs du modèle comparé
-	var vectorRepo repository.SectionRepository = sectionRepo
+	var vectorRepo store.SectionRepository = sectionRepo
 	if *modelPath != "" {
 		ids := make([]string, 0, len(gameIDs))
 		for _, id := range gameIDs {
 			ids = append(ids, id)
 		}
-		vectorRepo, err = newMemoryVectors(ctx, db.Pool, sectionRepo, embedder, ids)
+		vectorRepo, err = newMemoryVectors(ctx, store.Pool, sectionRepo, embedder, ids)
 		if err != nil {
 			log.Fatalf("-model : %v", err)
 		}
 	}
-	search := &retriever.Retriever{Embedder: embedder, Sections: vectorRepo, MinVectorScore: config.C.VectorMinScore}
-	ask := usecase.NewAskQuestionUseCase(gameRepo, search, llm, nil, nil)
+	retriever := &search.Retriever{Embedder: embedder, Sections: vectorRepo, MinVectorScore: config.C.VectorMinScore}
+	asker := ask.NewService(gameRepo, retriever, llmClient, nil, nil)
 
 	var results []*result
 	var failures []string
 	for i, q := range ds.Questions {
-		r, retrieved, problems := evalRetrieval(ctx, ask, embedder, vectorRepo, gameIDs[q.Game], gamePages[q.Game], q)
+		r, retrieved, problems := evalRetrieval(ctx, asker, embedder, vectorRepo, gameIDs[q.Game], gamePages[q.Game], q)
 		failures = append(failures, problems...)
 		if *withLLM {
-			evalAnswer(ctx, llm, q, retrieved, r)
+			evalAnswer(ctx, llmClient, q, retrieved, r)
 			log.Printf("[%d/%d] %s — %s", i+1, len(ds.Questions), q.Question, llmSummary(q, r))
 			if failure := describeAnswerFailure(q, r); failure != "" {
 				failures = append(failures, failure)
@@ -248,10 +247,10 @@ func main() {
 }
 
 // evalRetrieval mesure la recherche d'une question ; failures décrit ses échecs.
-func evalRetrieval(ctx context.Context, ask *usecase.AskQuestionUseCase, embedder retriever.Embedder,
+func evalRetrieval(ctx context.Context, ask *ask.Service, embedder search.Embedder,
 	sectionRepo interface {
-		VectorSearch(context.Context, string, []float64, int) ([]*entity.ScoredSection, error)
-	}, gameID string, pages []string, q question) (r *result, retrieved *usecase.RetrievedContext, failures []string) {
+		VectorSearch(context.Context, string, []float64, int) ([]*store.ScoredSection, error)
+	}, gameID string, pages []string, q question) (r *result, retrieved *ask.RetrievedContext, failures []string) {
 	r = &result{Game: q.Game, Question: q.Question}
 
 	start := time.Now()
@@ -314,7 +313,7 @@ func evalRetrieval(ctx context.Context, ask *usecase.AskQuestionUseCase, embedde
 }
 
 // evalAnswer interroge le LLM avec le contexte de la question et note sa réponse.
-func evalAnswer(ctx context.Context, llm usecase.LLM, q question, retrieved *usecase.RetrievedContext, r *result) {
+func evalAnswer(ctx context.Context, llm ask.LLM, q question, retrieved *ask.RetrievedContext, r *result) {
 	start := time.Now()
 	var firstToken time.Duration
 	resp, err := llm.Query(ctx, q.Question, retrieved.Text, q.History, func(string) {
@@ -617,14 +616,14 @@ func loadDataset(path, filter string) (*dataset, error) {
 
 // indexGame supprime les sections du jeu puis le réindexe avec le pipeline courant.
 func indexGame(ctx context.Context, gameRepo interface {
-	FindByName(context.Context, string) (*entity.Game, error)
-	Save(context.Context, *entity.Game) error
+	FindByName(context.Context, string) (*store.Game, error)
+	Save(context.Context, *store.Game) error
 }, sectionRepo interface {
 	DeleteByGameID(context.Context, string) error
-}, pipeline usecase.PipelineService, name string, files []string) error {
+}, pipeline index.Processor, name string, files []string) error {
 	game, err := gameRepo.FindByName(ctx, name)
 	if err != nil {
-		game = &entity.Game{ID: "eval-" + strings.ToLower(strings.ReplaceAll(name, " ", "-")), Name: name}
+		game = &store.Game{ID: "eval-" + strings.ToLower(strings.ReplaceAll(name, " ", "-")), Name: name}
 	}
 	game.Stats = map[string]interface{}{"files": files}
 	if err := gameRepo.Save(ctx, game); err != nil {
@@ -633,7 +632,7 @@ func indexGame(ctx context.Context, gameRepo interface {
 	if err := sectionRepo.DeleteByGameID(ctx, game.ID); err != nil {
 		return err
 	}
-	return pipeline.Process(ctx, &usecase.ImportOptions{GameName: name, FilePaths: files})
+	return pipeline.Process(ctx, &index.ImportOptions{GameName: name, FilePaths: files})
 }
 
 var normalizer = strings.NewReplacer("’", "'", "‘", "'", "«", "\"", "»", "\"", "“", "\"", "”", "\"", " ", " ")
@@ -709,7 +708,7 @@ func citedPages(answer string) []int {
 }
 
 // pageInSections : la page fait partie d'une section envoyée au LLM.
-func pageInSections(page int, sections []*entity.ScoredSection) bool {
+func pageInSections(page int, sections []*store.ScoredSection) bool {
 	for _, s := range sections {
 		if pageInRange([]int{page}, s.PageStart, s.PageEnd) {
 			return true
@@ -718,7 +717,7 @@ func pageInSections(page int, sections []*entity.ScoredSection) bool {
 	return false
 }
 
-func describeFailure(q question, sections []*entity.ScoredSection) string {
+func describeFailure(q question, sections []*store.ScoredSection) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "✗ [%s] %s\n    attendu : %q\n", q.Game, q.Question, q.Expected)
 	for i, s := range sections {

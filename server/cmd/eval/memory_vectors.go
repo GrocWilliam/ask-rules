@@ -8,9 +8,8 @@ import (
 	"sort"
 	"time"
 
-	"ask-rules-server/internal/domain/entity"
-	"ask-rules-server/internal/domain/repository"
-	infraService "ask-rules-server/internal/infrastructure/service"
+	"ask-rules-server/internal/embed"
+	"ask-rules-server/internal/store"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -20,19 +19,19 @@ import (
 // sans réindexer ni modifier le schéma (vector(384)). Plein texte et voisines
 // restent ceux de la base.
 type memoryVectors struct {
-	repository.SectionRepository
+	store.SectionRepository
 	sections map[string][]memorySection // par game_id
 }
 
 type memorySection struct {
-	section entity.ScoredSection
+	section store.ScoredSection
 	vector  []float32
 }
 
 // newMemoryVectors lit les sections des jeux et calcule leurs vecteurs avec
 // embedder, sur le même texte que le pipeline d'import (chapitre + contenu).
-func newMemoryVectors(ctx context.Context, pool *pgxpool.Pool, repo repository.SectionRepository,
-	embedder *infraService.ONNXEmbedderAdapter, gameIDs []string) (*memoryVectors, error) {
+func newMemoryVectors(ctx context.Context, pool *pgxpool.Pool, repo store.SectionRepository,
+	embedder *embed.Embedder, gameIDs []string) (*memoryVectors, error) {
 	m := &memoryVectors{SectionRepository: repo, sections: map[string][]memorySection{}}
 	for _, gameID := range gameIDs {
 		rows, err := pool.Query(ctx, `
@@ -43,9 +42,9 @@ func newMemoryVectors(ctx context.Context, pool *pgxpool.Pool, repo repository.S
 		if err != nil {
 			return nil, err
 		}
-		var sections []entity.ScoredSection
+		var sections []store.ScoredSection
 		for rows.Next() {
-			var s entity.ScoredSection
+			var s store.ScoredSection
 			if err := rows.Scan(&s.ID, &s.GameID, &s.Title, &s.SectionType, &s.Text, &s.Summary,
 				&s.PageStart, &s.PageEnd, &s.SourceFile, &s.HierarchyPath, &s.ChunkIndex); err != nil {
 				rows.Close()
@@ -80,8 +79,8 @@ func newMemoryVectors(ctx context.Context, pool *pgxpool.Pool, repo repository.S
 }
 
 // VectorSearch classe les sections du jeu par similarité cosinus (vecteurs normalisés).
-func (m *memoryVectors) VectorSearch(_ context.Context, gameID string, embedding []float64, limit int) ([]*entity.ScoredSection, error) {
-	var results []*entity.ScoredSection
+func (m *memoryVectors) VectorSearch(_ context.Context, gameID string, embedding []float64, limit int) ([]*store.ScoredSection, error) {
+	var results []*store.ScoredSection
 	for _, ms := range m.sections[gameID] {
 		if len(ms.vector) != len(embedding) {
 			return nil, fmt.Errorf("dimension %d au lieu de %d", len(embedding), len(ms.vector))

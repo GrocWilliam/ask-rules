@@ -1,0 +1,298 @@
+// index/reprocess.go — Use case pour reprocesser un jeu existant
+package index
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"runtime"
+	"strings"
+	"time"
+
+	"ask-rules-server/internal/store"
+)
+
+// ReprocessRequest est la requête de reprocess.
+type ReprocessRequest struct {
+	GameID  string
+	OnEvent func(event string, data map[string]interface{})
+}
+
+// Reprocess relance le pipeline sur les fichiers déjà importés du jeu.
+func (s *Service) Reprocess(ctx context.Context, req *ReprocessRequest) error {
+	emit := req.OnEvent
+	if emit == nil {
+		emit = func(string, map[string]interface{}) {}
+	}
+
+	// 1. Récupérer le jeu
+	game, err := s.gameRepo.FindByID(ctx, req.GameID)
+	if err != nil {
+		if err == store.ErrGameNotFound {
+			return fmt.Errorf("game '%s' not found: %w", req.GameID, store.ErrGameNotFound)
+		}
+		return fmt.Errorf("failed to find game: %w", err)
+	}
+
+	// 2. Récupérer les chemins de fichiers depuis les stats (nouveau format)
+	// ou depuis la colonne `fichier` séparés par `+` (ancien format).
+	filePaths := game.Files()
+	needsMigration := false
+	if len(filePaths) == 0 && game.FilePath != "" {
+		for _, p := range strings.Split(game.FilePath, "+") {
+			if s := strings.TrimSpace(p); s != "" {
+				filePaths = append(filePaths, s)
+			}
+		}
+		needsMigration = len(filePaths) > 0
+	}
+	if len(filePaths) == 0 {
+		return fmt.Errorf("no files found for game '%s'", game.Name)
+	}
+
+	emit("start", map[string]interface{}{
+		"game":  game.Name,
+		"files": len(filePaths),
+	})
+
+	// 3. Relancer le pipeline ; les sections existantes ne sont remplacées
+	// qu'une fois l'indexation réussie
+	start := time.Now()
+	if err := s.reprocessFiles(ctx, game, filePaths, emit); err != nil {
+		log.Printf("[ERROR] ReprocessGame - Pipeline failed for game '%s': %v", game.Name, err)
+		return fmt.Errorf("pipeline failed: %w", err)
+	}
+
+	runtime.GC()
+
+	duration := time.Since(start)
+
+	// Migrer vers le nouveau format si les fichiers venaient de l'ancienne colonne `fichier`
+	if needsMigration {
+		if game.Stats == nil {
+			game.Stats = make(map[string]interface{})
+		}
+		game.Stats["files"] = filePaths
+		if err := s.gameRepo.Save(ctx, game); err != nil {
+			log.Printf("[WARN] ReprocessGame - Failed to migrate stats.files for game '%s': %v", game.Name, err)
+		} else {
+			log.Printf("[INFO] ReprocessGame - Migrated stats.files for game '%s' (%d file(s))", game.Name, len(filePaths))
+		}
+	}
+
+	// Logger le reprocess en base de données
+	if s.logRepo != nil {
+		_ = s.logRepo.Save(ctx, &store.LogEntry{
+			EventType: "game_reprocess",
+			Message:   fmt.Sprintf("Reprocess du jeu '%s' (%d fichier(s))", game.Name, len(filePaths)),
+			Metadata: map[string]interface{}{
+				"game":     game.Name,
+				"files":    len(filePaths),
+				"duration": duration.Milliseconds(),
+			},
+		})
+	}
+
+	emit("complete", map[string]interface{}{
+		"game":     game.Name,
+		"files":    len(filePaths),
+		"duration": duration.Milliseconds(),
+	})
+
+	return nil
+}
+
+// ReprocessAll relance le pipeline sur les jeux sélectionnés (ou tous si gameIDs est vide).
+func (s *Service) ReprocessAll(ctx context.Context, gameIDs []string, emit func(string, map[string]interface{})) {
+	if emit == nil {
+		emit = func(string, map[string]interface{}) {}
+	}
+
+	// 1. Lister tous les jeux
+	allGames, err := s.gameRepo.List(ctx)
+	if err != nil {
+		emit("error", map[string]interface{}{"error": err.Error()})
+		return
+	}
+
+	// 2. Filtrer si une sélection est fournie
+	games := allGames
+	if len(gameIDs) > 0 {
+		idSet := make(map[string]struct{}, len(gameIDs))
+		for _, id := range gameIDs {
+			idSet[id] = struct{}{}
+		}
+		filtered := allGames[:0]
+		for _, gws := range allGames {
+			if _, ok := idSet[gws.Game.ID]; ok {
+				filtered = append(filtered, gws)
+			}
+		}
+		games = filtered
+	}
+
+	total := len(games)
+	emit("start", map[string]interface{}{"total": total})
+
+	globalStart := time.Now()
+	successes := 0
+
+	for i, gws := range games {
+		select {
+		case <-ctx.Done():
+			emit("error", map[string]interface{}{"error": "cancelled"})
+			return
+		default:
+		}
+
+		game := &gws.Game
+		emit("game_start", map[string]interface{}{
+			"index": i + 1,
+			"total": total,
+			"game":  game.Name,
+		})
+
+		filePaths := game.Files()
+		gamNeedsMigration := false
+		if len(filePaths) == 0 && game.FilePath != "" {
+			for _, p := range strings.Split(game.FilePath, "+") {
+				if s := strings.TrimSpace(p); s != "" {
+					filePaths = append(filePaths, s)
+				}
+			}
+			gamNeedsMigration = len(filePaths) > 0
+		}
+		if len(filePaths) == 0 {
+			emit("game_error", map[string]interface{}{
+				"game":  game.Name,
+				"error": "no files found",
+			})
+			continue
+		}
+
+		// Relancer le pipeline en relayant les événements ; les sections
+		// existantes ne sont remplacées qu'une fois l'indexation réussie
+		pipelineErr := s.reprocessFiles(ctx, game, filePaths, emit)
+
+		if pipelineErr != nil {
+			log.Printf("[ERROR] ReprocessAll - Pipeline failed for '%s': %v", game.Name, pipelineErr)
+			emit("game_error", map[string]interface{}{
+				"game":  game.Name,
+				"error": pipelineErr.Error(),
+			})
+			continue
+		}
+
+		successes++
+		if gamNeedsMigration {
+			if game.Stats == nil {
+				game.Stats = make(map[string]interface{})
+			}
+			game.Stats["files"] = filePaths
+			if err := s.gameRepo.Save(ctx, game); err != nil {
+				log.Printf("[WARN] ReprocessAll - Failed to migrate stats.files for '%s': %v", game.Name, err)
+			}
+		}
+		emit("game_done", map[string]interface{}{"game": game.Name})
+		runtime.GC()
+	}
+
+	duration := time.Since(globalStart)
+
+	// Logger le reprocess-all en base de données
+	if s.logRepo != nil {
+		_ = s.logRepo.Save(context.Background(), &store.LogEntry{
+			EventType: "game_reprocess_all",
+			Message:   fmt.Sprintf("Reprocess de tous les jeux: %d/%d réussis", successes, total),
+			Metadata: map[string]interface{}{
+				"success":  successes,
+				"total":    total,
+				"duration": duration.Milliseconds(),
+			},
+		})
+	}
+
+	emit("complete", map[string]interface{}{
+		"success":  successes,
+		"total":    total,
+		"duration": duration.Milliseconds(),
+	})
+}
+
+// reprocessFiles relance le pipeline sur filePaths et remplace les sections du jeu
+// en cas de succès (voir la fonction reindex).
+func (s *Service) reprocessFiles(ctx context.Context, game *store.Game, filePaths []string, emit func(string, map[string]interface{})) error {
+	return reindex(ctx, s.gameRepo, s.sectionRepo, game, true, emit, func() error {
+		return s.pipeline.Process(ctx, &ImportOptions{
+			GameName:  game.Name,
+			FilePaths: filePaths,
+			OnEvent:   mapPipelineEvents(emit),
+		})
+	})
+}
+
+// mapPipelineEvents convertit les événements bruts du pipeline vers les événements SSE attendus par le frontend.
+//
+// Pipeline émet : extracting, chunking, embedding{file,chunks}, progress{file,done,total},
+//
+//	done, file_error, section_error, gameplay, gameplay_error
+//
+// Frontend attend : step{message}, embedding_start{total}, embedding_progress{current,total}, complete, error
+func mapPipelineEvents(emit func(string, map[string]interface{})) func(string, map[string]interface{}) {
+	return func(event string, data map[string]interface{}) {
+		switch event {
+		case "extracting":
+			file, _ := data["file"].(string)
+			emit("step", map[string]interface{}{"message": "Extraction : " + file})
+		case "chunking":
+			file, _ := data["file"].(string)
+			emit("step", map[string]interface{}{"message": "Découpage : " + file})
+		case "embedding":
+			// chunks peut être int ou float64 selon la source
+			var total int
+			switch v := data["chunks"].(type) {
+			case int:
+				total = v
+			case float64:
+				total = int(v)
+			}
+			emit("embedding_start", map[string]interface{}{"total": total})
+		case "progress":
+			var current, total int
+			switch v := data["done"].(type) {
+			case int:
+				current = v
+			case float64:
+				current = int(v)
+			}
+			switch v := data["total"].(type) {
+			case int:
+				total = v
+			case float64:
+				total = int(v)
+			}
+			emit("embedding_progress", map[string]interface{}{"current": current, "total": total})
+		case "done":
+			// événement fin de pipeline — ignoré, Reprocess émet "complete" lui-même
+		case "file_error", "section_error":
+			file, _ := data["file"].(string)
+			errMsg, _ := data["error"].(string)
+			msg := event
+			if file != "" {
+				msg += " " + file
+			}
+			if errMsg != "" {
+				msg += ": " + errMsg
+			}
+			emit("step", map[string]interface{}{"message": "⚠️ " + msg})
+		case "gameplay":
+			emit("step", map[string]interface{}{"message": "Extraction gameplay..."})
+		case "gameplay_error":
+			errMsg, _ := data["error"].(string)
+			emit("step", map[string]interface{}{"message": "⚠️ Gameplay : " + errMsg})
+		// événements déjà bien formés (import direct)
+		case "step":
+			emit("step", data)
+		}
+	}
+}
