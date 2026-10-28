@@ -134,25 +134,22 @@ func (uc *AskQuestionUseCase) ExecuteStream(ctx context.Context, req *AskRequest
 		}
 	}
 
-	// 4. Rechercher les sections pertinentes
-	sections, err := uc.search(ctx, game.ID, req.Question, history)
+	// 4-5. Rechercher les sections pertinentes et construire le contexte pour le LLM
+	retrieved, err := uc.RetrieveContext(ctx, game.ID, req.Question, history)
 	if err != nil {
 		log.Printf("[ERROR] AskQuestion - Failed to search sections for game '%s': %v", game.Name, err)
 		return nil, fmt.Errorf("failed to search sections: %w", err)
 	}
 
-	if len(sections) == 0 {
+	if len(retrieved.Sections) == 0 {
 		log.Printf("[WARN] AskQuestion - No sections found for game '%s' with question: %s", game.Name, req.Question)
 		return nil, entity.ErrNoSectionsFound
 	}
 	// Les sources affichées au joueur sont celles que le LLM a reçues
-	sections = fitContextBudget(sections)
-
-	// 5. Construire le contexte pour le LLM
-	contextText := uc.buildContext(sections)
+	sections := retrieved.Sections
 
 	// 6. Générer la réponse avec le LLM
-	llmResponse, err := uc.llm.Query(ctx, req.Question, contextText, history, onToken)
+	llmResponse, err := uc.llm.Query(ctx, req.Question, retrieved.Text, history, onToken)
 	if err != nil {
 		log.Printf("[ERROR] AskQuestion - Failed to generate LLM answer for game '%s': %v", game.Name, err)
 		return nil, fmt.Errorf("failed to generate answer: %w", err)
@@ -199,6 +196,32 @@ func (uc *AskQuestionUseCase) ExecuteStream(ctx context.Context, req *AskRequest
 	}
 
 	return response, nil
+}
+
+// RetrievedContext est ce que le LLM reçoit pour répondre à une question.
+type RetrievedContext struct {
+	// Candidates : sections trouvées, par pertinence, avant le budget de contexte.
+	Candidates []*entity.ScoredSection
+	// Sections : candidates retenues dans le budget, envoyées au LLM.
+	Sections []*entity.ScoredSection
+	// Text : contexte envoyé au LLM, construit à partir de Sections.
+	Text string
+}
+
+// RetrieveContext recherche les sections de la question et construit le
+// contexte du LLM, tel que l'utilise ExecuteStream (aussi utilisé par cmd/eval).
+// history doit déjà être borné (trimHistory).
+func (uc *AskQuestionUseCase) RetrieveContext(ctx context.Context, gameID, question string, history []entity.ChatTurn) (*RetrievedContext, error) {
+	candidates, err := uc.search(ctx, gameID, question, history)
+	if err != nil {
+		return nil, err
+	}
+	sections := fitContextBudget(candidates)
+	return &RetrievedContext{
+		Candidates: candidates,
+		Sections:   sections,
+		Text:       uc.buildContext(sections),
+	}, nil
 }
 
 // trimHistory ne garde que les derniers échanges complets, tronqués, pour
