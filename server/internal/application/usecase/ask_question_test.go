@@ -9,7 +9,6 @@ import (
 
 	"ask-rules-server/internal/application/usecase"
 	"ask-rules-server/internal/domain/entity"
-	"ask-rules-server/internal/domain/service"
 )
 
 // Test : Cas nominal
@@ -25,7 +24,7 @@ func TestAskQuestionUseCase_Execute_Success(t *testing.T) {
 	}
 
 	retriever := &mockRetriever{
-		searchFunc: func(ctx context.Context, req *service.SearchRequest) ([]*entity.ScoredSection, error) {
+		searchFunc: func(ctx context.Context, gameID, question string, limit int) ([]*entity.ScoredSection, error) {
 			pageStart := 2
 			return []*entity.ScoredSection{
 				{
@@ -115,7 +114,7 @@ func TestAskQuestionUseCase_Execute_CacheHit(t *testing.T) {
 	}
 
 	retriever := &mockRetriever{
-		searchFunc: func(ctx context.Context, req *service.SearchRequest) ([]*entity.ScoredSection, error) {
+		searchFunc: func(ctx context.Context, gameID, question string, limit int) ([]*entity.ScoredSection, error) {
 			pageStart := 2
 			return []*entity.ScoredSection{
 				{
@@ -170,7 +169,7 @@ func TestAskQuestionUseCase_CacheInvalidatedByReindex(t *testing.T) {
 		},
 	}
 	retriever := &mockRetriever{
-		searchFunc: func(ctx context.Context, req *service.SearchRequest) ([]*entity.ScoredSection, error) {
+		searchFunc: func(ctx context.Context, gameID, question string, limit int) ([]*entity.ScoredSection, error) {
 			return []*entity.ScoredSection{{ID: "s1", GameID: "game-1", Title: "Setup", Text: "..."}}, nil
 		},
 	}

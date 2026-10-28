@@ -52,7 +52,7 @@ import (
 	"ask-rules-server/internal/application/usecase"
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/repository"
-	"ask-rules-server/internal/domain/service"
+	"ask-rules-server/internal/domain/service/retriever"
 	"ask-rules-server/internal/infrastructure/config"
 	"ask-rules-server/internal/infrastructure/persistence/db"
 	postgresRepo "ask-rules-server/internal/infrastructure/persistence/postgres"
@@ -208,8 +208,8 @@ func main() {
 			log.Fatalf("-model : %v", err)
 		}
 	}
-	retriever := infraService.NewHybridRetriever(vectorRepo, embedder)
-	ask := usecase.NewAskQuestionUseCase(gameRepo, retriever, llm, nil, nil)
+	search := &retriever.Retriever{Embedder: embedder, Sections: vectorRepo, MinVectorScore: config.C.VectorMinScore}
+	ask := usecase.NewAskQuestionUseCase(gameRepo, search, llm, nil, nil)
 
 	var results []*result
 	var failures []string
@@ -248,7 +248,7 @@ func main() {
 }
 
 // evalRetrieval mesure la recherche d'une question ; failures décrit ses échecs.
-func evalRetrieval(ctx context.Context, ask *usecase.AskQuestionUseCase, embedder service.EmbedderService,
+func evalRetrieval(ctx context.Context, ask *usecase.AskQuestionUseCase, embedder retriever.Embedder,
 	sectionRepo interface {
 		VectorSearch(context.Context, string, []float64, int) ([]*entity.ScoredSection, error)
 	}, gameID string, pages []string, q question) (r *result, retrieved *usecase.RetrievedContext, failures []string) {
@@ -314,7 +314,7 @@ func evalRetrieval(ctx context.Context, ask *usecase.AskQuestionUseCase, embedde
 }
 
 // evalAnswer interroge le LLM avec le contexte de la question et note sa réponse.
-func evalAnswer(ctx context.Context, llm service.LLMService, q question, retrieved *usecase.RetrievedContext, r *result) {
+func evalAnswer(ctx context.Context, llm usecase.LLM, q question, retrieved *usecase.RetrievedContext, r *result) {
 	start := time.Now()
 	var firstToken time.Duration
 	resp, err := llm.Query(ctx, q.Question, retrieved.Text, q.History, func(string) {
@@ -328,8 +328,8 @@ func evalAnswer(ctx context.Context, llm service.LLMService, q question, retriev
 		r.Error = err.Error()
 		return
 	}
-	if resp.TokensUsed != nil {
-		r.Tokens = resp.TokensUsed.Total
+	if resp.Tokens != nil {
+		r.Tokens = resp.Tokens.Total
 	}
 
 	r.Answer = resp.Answer

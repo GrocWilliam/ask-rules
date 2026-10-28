@@ -18,7 +18,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"ask-rules-server/internal/domain/service"
 	"ask-rules-server/internal/infrastructure/config"
 
 	ort "github.com/yalue/onnxruntime_go"
@@ -59,7 +58,7 @@ type vocabEntry struct {
 	score float32
 }
 
-// ONNXEmbedderAdapter implémente EmbedderService avec ONNX Runtime.
+// ONNXEmbedderAdapter calcule les embeddings (questions et passages) avec ONNX Runtime.
 type ONNXEmbedderAdapter struct {
 	initMu  sync.Mutex // protège initialized + session
 	ortMu   sync.Mutex // protège les appels Run()
@@ -85,7 +84,7 @@ type ONNXEmbedderAdapter struct {
 
 // NewONNXEmbedder crée un nouvel adapter pour l'embedder ONNX.
 // Le modèle est libéré automatiquement après 5 minutes d'inactivité.
-func NewONNXEmbedder() service.EmbedderService {
+func NewONNXEmbedder() *ONNXEmbedderAdapter {
 	return &ONNXEmbedderAdapter{
 		unkID:       3, // <unk> dans multilingual-e5-small
 		clsID:       0, // <s>

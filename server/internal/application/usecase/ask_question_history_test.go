@@ -9,7 +9,6 @@ import (
 
 	"ask-rules-server/internal/application/usecase"
 	"ask-rules-server/internal/domain/entity"
-	"ask-rules-server/internal/domain/service"
 )
 
 // historyFixture prépare un use case qui enregistre la recherche et l'historique reçus par le LLM.
@@ -20,8 +19,8 @@ func historyFixture(searchQueries *[]string, llmHistory *[]entity.ChatTurn, llmC
 		},
 	}
 	retriever := &mockRetriever{
-		searchFunc: func(ctx context.Context, req *service.SearchRequest) ([]*entity.ScoredSection, error) {
-			*searchQueries = append(*searchQueries, req.Question)
+		searchFunc: func(ctx context.Context, gameID, question string, limit int) ([]*entity.ScoredSection, error) {
+			*searchQueries = append(*searchQueries, question)
 			id := fmt.Sprintf("s%d", len(*searchQueries))
 			return []*entity.ScoredSection{
 				{ID: id, Title: "Score", Text: "Les oiseaux rapportent des points."},
@@ -30,10 +29,10 @@ func historyFixture(searchQueries *[]string, llmHistory *[]entity.ChatTurn, llmC
 		},
 	}
 	llmSvc := &mockLLM{
-		queryFunc: func(ctx context.Context, question, context string, history []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error) {
+		queryFunc: func(ctx context.Context, question, context string, history []entity.ChatTurn, onToken func(string)) (*entity.LLMResponse, error) {
 			*llmCalls++
 			*llmHistory = history
-			return &service.LLMResponse{Answer: "Réponse", Model: "mock-model"}, nil
+			return &entity.LLMResponse{Answer: "Réponse", Model: "mock-model"}, nil
 		},
 	}
 	return usecase.NewAskQuestionUseCase(gameRepo, retriever, llmSvc, newMockCache(), &mockLogRepo{})

@@ -14,24 +14,42 @@ import (
 
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/repository"
-	"ask-rules-server/internal/domain/service"
 )
+
+// Searcher retrouve les sections d'un jeu pour une question (retriever.Retriever).
+type Searcher interface {
+	Search(ctx context.Context, gameID, question string, limit int) ([]*entity.ScoredSection, error)
+}
+
+// LLM génère la réponse à partir de la question et des extraits du livret.
+// onToken, s'il n'est pas nil, reçoit la réponse au fil de sa génération
+// (streaming) ; la réponse complète est retournée à la fin dans tous les cas.
+type LLM interface {
+	Query(ctx context.Context, question, contextText string, history []entity.ChatTurn, onToken func(string)) (*entity.LLMResponse, error)
+}
+
+// Cache garde les réponses aux premières questions (Redis ou mémoire).
+// Get retourne nil si la clé est absente ou expirée.
+type Cache interface {
+	Get(ctx context.Context, key string) (interface{}, error)
+	Set(ctx context.Context, key string, value interface{}) error
+}
 
 // AskQuestionUseCase gère la logique métier pour poser une question sur un jeu.
 type AskQuestionUseCase struct {
 	gameRepo  repository.GameRepository
-	retriever service.RetrieverService
-	llm       service.LLMService
-	cache     service.CacheService
+	retriever Searcher
+	llm       LLM
+	cache     Cache
 	logRepo   LogRepository
 }
 
 // NewAskQuestionUseCase crée un nouveau use case.
 func NewAskQuestionUseCase(
 	gameRepo repository.GameRepository,
-	retriever service.RetrieverService,
-	llm service.LLMService,
-	cache service.CacheService,
+	retriever Searcher,
+	llm LLM,
+	cache Cache,
 	logRepo LogRepository,
 ) *AskQuestionUseCase {
 	return &AskQuestionUseCase{
@@ -180,10 +198,10 @@ func (uc *AskQuestionUseCase) ExecuteStream(ctx context.Context, req *AskRequest
 		if len(history) > 0 {
 			metadata["history_turns"] = len(history)
 		}
-		if llmResponse.TokensUsed != nil {
-			metadata["tokens_input"] = llmResponse.TokensUsed.Input
-			metadata["tokens_output"] = llmResponse.TokensUsed.Output
-			metadata["tokens_total"] = llmResponse.TokensUsed.Total
+		if llmResponse.Tokens != nil {
+			metadata["tokens_input"] = llmResponse.Tokens.Prompt
+			metadata["tokens_output"] = llmResponse.Tokens.Completion
+			metadata["tokens_total"] = llmResponse.Tokens.Total
 		}
 		entry := &LogEntry{
 			EventType: "ask_question",
@@ -262,7 +280,7 @@ func truncateRunes(s string, max int) string {
 func (uc *AskQuestionUseCase) search(ctx context.Context, gameID, question string, history []entity.ChatTurn) ([]*entity.ScoredSection, error) {
 	// Candidats : fitContextBudget garde ensuite ce qui tient dans le budget
 	const limit = 6
-	own, err := uc.retriever.Search(ctx, &service.SearchRequest{GameID: gameID, Question: question, Limit: limit})
+	own, err := uc.retriever.Search(ctx, gameID, question, limit)
 	if err != nil || len(history) == 0 {
 		return own, err
 	}
@@ -271,11 +289,7 @@ func (uc *AskQuestionUseCase) search(ctx context.Context, gameID, question strin
 	for i := len(history) - 1; i >= 0; i-- {
 		parts = append(parts, history[i].Question)
 	}
-	enriched, err := uc.retriever.Search(ctx, &service.SearchRequest{
-		GameID:   gameID,
-		Question: strings.Join(parts, " "),
-		Limit:    limit,
-	})
+	enriched, err := uc.retriever.Search(ctx, gameID, strings.Join(parts, " "), limit)
 	if err != nil {
 		return nil, err
 	}

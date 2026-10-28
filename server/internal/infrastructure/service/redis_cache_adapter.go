@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"ask-rules-server/internal/domain/service"
 	"ask-rules-server/internal/infrastructure/config"
 
 	"github.com/redis/go-redis/v9"
@@ -25,7 +24,7 @@ type cacheEntry struct {
 	Expires time.Time
 }
 
-// RedisCacheAdapter implémente CacheService avec Redis ou fallback mémoire.
+// RedisCacheAdapter met en cache les réponses dans Redis, ou en mémoire sans Redis.
 type RedisCacheAdapter struct {
 	client   *redis.Client
 	useRedis bool
@@ -35,7 +34,7 @@ type RedisCacheAdapter struct {
 }
 
 // NewRedisCache crée un nouvel adapter pour le cache.
-func NewRedisCache() service.CacheService {
+func NewRedisCache() *RedisCacheAdapter {
 	adapter := &RedisCacheAdapter{
 		memStore: make(map[string]*cacheEntry),
 	}

@@ -60,8 +60,8 @@ func TestQuery_StreamsTokens(t *testing.T) {
 	if resp.Answer != "**Oui**, p. 4." || resp.Model != "mistral-small" {
 		t.Fatalf("réponse complète inattendue : %+v", resp)
 	}
-	if resp.TokensUsed == nil || resp.TokensUsed.Total != 14 {
-		t.Fatalf("usage non lu : %+v", resp.TokensUsed)
+	if resp.Tokens == nil || resp.Tokens.Total != 14 {
+		t.Fatalf("usage non lu : %+v", resp.Tokens)
 	}
 }
 

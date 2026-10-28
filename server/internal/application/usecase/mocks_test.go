@@ -8,7 +8,6 @@ import (
 
 	"ask-rules-server/internal/application/usecase"
 	"ask-rules-server/internal/domain/entity"
-	"ask-rules-server/internal/domain/service"
 )
 
 // Mock GameRepository
@@ -120,24 +119,24 @@ func (m *mockSectionRepo) Neighbors(ctx context.Context, sec *entity.ScoredSecti
 	return []*entity.ScoredSection{sec}, nil
 }
 
-// Mock RetrieverService
+// Mock Searcher
 type mockRetriever struct {
-	searchFunc func(ctx context.Context, req *service.SearchRequest) ([]*entity.ScoredSection, error)
+	searchFunc func(ctx context.Context, gameID, question string, limit int) ([]*entity.ScoredSection, error)
 }
 
-func (m *mockRetriever) Search(ctx context.Context, req *service.SearchRequest) ([]*entity.ScoredSection, error) {
+func (m *mockRetriever) Search(ctx context.Context, gameID, question string, limit int) ([]*entity.ScoredSection, error) {
 	if m.searchFunc != nil {
-		return m.searchFunc(ctx, req)
+		return m.searchFunc(ctx, gameID, question, limit)
 	}
 	return []*entity.ScoredSection{}, nil
 }
 
-// Mock LLMService
+// Mock LLM
 type mockLLM struct {
-	queryFunc func(ctx context.Context, question, context string, history []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error)
+	queryFunc func(ctx context.Context, question, context string, history []entity.ChatTurn, onToken func(string)) (*entity.LLMResponse, error)
 }
 
-func (m *mockLLM) Query(ctx context.Context, question, context string, history []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error) {
+func (m *mockLLM) Query(ctx context.Context, question, context string, history []entity.ChatTurn, onToken func(string)) (*entity.LLMResponse, error) {
 	if m.queryFunc != nil {
 		return m.queryFunc(ctx, question, context, history, onToken)
 	}
@@ -145,15 +144,13 @@ func (m *mockLLM) Query(ctx context.Context, question, context string, history [
 		onToken("Mocked ")
 		onToken("answer")
 	}
-	return &service.LLMResponse{
+	return &entity.LLMResponse{
 		Answer: "Mocked answer",
 		Model:  "mock-model",
 	}, nil
 }
 
-func (m *mockLLM) Warmup() {}
-
-// Mock CacheService
+// Mock Cache
 type mockCache struct {
 	data map[string][]byte // Stocker comme bytes pour simuler JSON
 }

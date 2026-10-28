@@ -16,7 +16,6 @@ import (
 	"ask-rules-server/internal/application/usecase"
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/repository"
-	"ask-rules-server/internal/domain/service"
 	"ask-rules-server/internal/domain/service/nlp"
 	"ask-rules-server/internal/infrastructure/storage"
 )
@@ -25,15 +24,15 @@ import (
 // ADAPTER
 // ──────────────────────────────────────────────────────────────────────────────
 
-// PipelineAdapter adapte le pipeline d'indexation à l'interface domaine.
+// PipelineAdapter indexe les fichiers d'un jeu (usecase.PipelineService).
 type PipelineAdapter struct {
-	embedder    service.EmbedderService
+	embedder    *ONNXEmbedderAdapter
 	gameRepo    repository.GameRepository
 	sectionRepo repository.SectionRepository
 }
 
 // NewPipeline crée un nouvel adapter pour le pipeline.
-func NewPipeline(gameRepo repository.GameRepository, sectionRepo repository.SectionRepository, embedder service.EmbedderService) usecase.PipelineService {
+func NewPipeline(gameRepo repository.GameRepository, sectionRepo repository.SectionRepository, embedder *ONNXEmbedderAdapter) *PipelineAdapter {
 	return &PipelineAdapter{
 		embedder:    embedder,
 		gameRepo:    gameRepo,
@@ -45,9 +44,7 @@ func NewPipeline(gameRepo repository.GameRepository, sectionRepo repository.Sect
 func (p *PipelineAdapter) Process(ctx context.Context, opts *usecase.ImportOptions) error {
 	err := p.run(ctx, opts.GameName, opts.FilePaths, opts.OnEvent)
 	// Libérer le modèle ONNX de la RAM après chaque traitement batch
-	if r, ok := p.embedder.(service.ReleasableEmbedder); ok {
-		r.Release()
-	}
+	p.embedder.Release()
 	return err
 }
 

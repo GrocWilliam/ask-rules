@@ -10,7 +10,6 @@ import (
 	"ask-rules-server/internal/application/usecase"
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/repository"
-	"ask-rules-server/internal/domain/service"
 )
 
 // Fakes minimaux : l'interface embarquée fournit les méthodes non utilisées.
@@ -25,21 +24,21 @@ func (fakeGames) FindByName(_ context.Context, name string) (*entity.Game, error
 
 type fakeRetriever struct{}
 
-func (fakeRetriever) Search(context.Context, *service.SearchRequest) ([]*entity.ScoredSection, error) {
+func (fakeRetriever) Search(context.Context, string, string, int) ([]*entity.ScoredSection, error) {
 	return []*entity.ScoredSection{{ID: "s1", Title: "Score", Text: "…"}}, nil
 }
 
-type fakeCache struct{ service.CacheService }
+type fakeCache struct{}
 
 func (fakeCache) Get(context.Context, string) (interface{}, error) { return nil, nil }
 func (fakeCache) Set(context.Context, string, interface{}) error   { return nil }
 
-type fakeLLM struct{ service.LLMService }
+type fakeLLM struct{}
 
-func (fakeLLM) Query(_ context.Context, _, _ string, _ []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error) {
+func (fakeLLM) Query(_ context.Context, _, _ string, _ []entity.ChatTurn, onToken func(string)) (*entity.LLMResponse, error) {
 	onToken("**Oui**")
 	onToken(" (p. 4).")
-	return &service.LLMResponse{Answer: "**Oui** (p. 4).", Model: "mock"}, nil
+	return &entity.LLMResponse{Answer: "**Oui** (p. 4).", Model: "mock"}, nil
 }
 
 func streamHandler() *AskHandler {

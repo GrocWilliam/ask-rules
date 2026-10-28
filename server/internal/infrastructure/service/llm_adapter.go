@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"ask-rules-server/internal/domain/entity"
-	"ask-rules-server/internal/domain/service"
 	"ask-rules-server/internal/infrastructure/config"
 )
 
@@ -85,14 +84,14 @@ func newChatProvider(llmConfig config.LLMProvider, client *http.Client) (chatPro
 	}, true
 }
 
-// ChatLLMAdapter implémente LLMService avec un seul fournisseur.
+// ChatLLMAdapter interroge un fournisseur LLM (API chat/completions).
 type ChatLLMAdapter struct {
 	client   *http.Client  // partagé : réutilise les connexions TLS
 	provider *chatProvider // nil si LLM_BASE_URL n'est pas défini
 }
 
 // NewLLM crée l'adapter LLM à partir de la configuration LLM_*.
-func NewLLM() service.LLMService {
+func NewLLM() *ChatLLMAdapter {
 	m := &ChatLLMAdapter{
 		client: &http.Client{
 			// Les délais sont gérés par fournisseur via le contexte
@@ -110,12 +109,12 @@ func NewLLM() service.LLMService {
 }
 
 // Query génère une réponse à partir de la question et du contexte fourni.
-func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string, history []entity.ChatTurn, onToken func(string)) (*service.LLMResponse, error) {
+func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string, history []entity.ChatTurn, onToken func(string)) (*entity.LLMResponse, error) {
 	if m.provider == nil {
 		if onToken != nil {
 			onToken(contextText)
 		}
-		return &service.LLMResponse{Answer: contextText}, nil
+		return &entity.LLMResponse{Answer: contextText}, nil
 	}
 
 	var strip *fillerStripper
@@ -131,21 +130,8 @@ func (m *ChatLLMAdapter) Query(ctx context.Context, question, contextText string
 		strip.flush()
 	}
 
-	// Convertir entity.LLMResponse → service.LLMResponse
-	var tokensUsed *service.TokenUsage
-	if resp.Tokens != nil {
-		tokensUsed = &service.TokenUsage{
-			Input:  resp.Tokens.Prompt,
-			Output: resp.Tokens.Completion,
-			Total:  resp.Tokens.Total,
-		}
-	}
-
-	return &service.LLMResponse{
-		Answer:     stripFiller(resp.Answer),
-		Model:      resp.Model,
-		TokensUsed: tokensUsed,
-	}, nil
+	resp.Answer = stripFiller(resp.Answer)
+	return &resp, nil
 }
 
 // stripFiller retire fillerOpening, sauf si la réponse ne contient rien d'autre.

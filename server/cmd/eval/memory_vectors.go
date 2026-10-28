@@ -10,7 +10,7 @@ import (
 
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/repository"
-	"ask-rules-server/internal/domain/service"
+	infraService "ask-rules-server/internal/infrastructure/service"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -32,7 +32,7 @@ type memorySection struct {
 // newMemoryVectors lit les sections des jeux et calcule leurs vecteurs avec
 // embedder, sur le même texte que le pipeline d'import (chapitre + contenu).
 func newMemoryVectors(ctx context.Context, pool *pgxpool.Pool, repo repository.SectionRepository,
-	embedder service.EmbedderService, gameIDs []string) (*memoryVectors, error) {
+	embedder *infraService.ONNXEmbedderAdapter, gameIDs []string) (*memoryVectors, error) {
 	m := &memoryVectors{SectionRepository: repo, sections: map[string][]memorySection{}}
 	for _, gameID := range gameIDs {
 		rows, err := pool.Query(ctx, `

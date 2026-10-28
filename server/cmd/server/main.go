@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	// Domain (interfaces uniquement)
 	"ask-rules-server/internal/application/usecase"
+	"ask-rules-server/internal/domain/service/retriever"
 
 	// Infrastructure (implémentations)
 	"ask-rules-server/internal/infrastructure/config"
@@ -52,14 +52,14 @@ func main() {
 	embedderSvc := infraService.NewONNXEmbedder() // Instance unique — ORT ne peut être initialisé qu'une fois
 	llmSvc := infraService.NewLLM()
 	cacheSvc := infraService.NewRedisCache()
-	retrieverSvc := infraService.NewHybridRetriever(sectionRepo, embedderSvc)
+	retrieverSvc := &retriever.Retriever{Embedder: embedderSvc, Sections: sectionRepo, MinVectorScore: config.C.VectorMinScore}
 	pipelineSvc := infraService.NewPipeline(gameRepo, sectionRepo, embedderSvc)
 
 	// 4. Créer les use cases
 	// Game use cases
 	askUseCase := usecase.NewAskQuestionUseCase(gameRepo, retrieverSvc, llmSvc, cacheSvc, logRepo)
 	upsertGameUseCase := usecase.NewUpsertGameUseCase(gameRepo)
-	deleteGameUseCase := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo, cacheSvc)
+	deleteGameUseCase := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo)
 	importGameUseCase := usecase.NewImportGameUseCase(gameRepo, sectionRepo, pipelineSvc, logRepo)
 	reprocessGameUseCase := usecase.NewReprocessGameUseCase(gameRepo, sectionRepo, pipelineSvc, logRepo)
 

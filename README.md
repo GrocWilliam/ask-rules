@@ -18,7 +18,7 @@ ask-rules/
 │   │   ├── domain/              # Entités métier + interfaces (repository, service)
 │   │   │   ├── entity/          # Game, Section, User
 │   │   │   ├── repository/      # Interfaces pour persistence
-│   │   │   └── service/         # Interfaces LLM, Cache, Embedder
+│   │   │   └── service/         # NLP (nlp/) et recherche hybride (retriever/)
 │   │   ├── application/         # Use cases (logique métier pure)
 │   │   │   └── usecase/         # AskQuestion, ImportGame, DeleteGame...
 │   │   ├── infrastructure/      # Implémentations concrètes

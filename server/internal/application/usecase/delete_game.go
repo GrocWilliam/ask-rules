@@ -9,7 +9,6 @@ import (
 
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/repository"
-	"ask-rules-server/internal/domain/service"
 	"ask-rules-server/internal/infrastructure/storage"
 )
 
@@ -17,19 +16,16 @@ import (
 type DeleteGameUseCase struct {
 	gameRepo    repository.GameRepository
 	sectionRepo repository.SectionRepository
-	cache       service.CacheService
 }
 
 // NewDeleteGameUseCase crée un nouveau use case.
 func NewDeleteGameUseCase(
 	gameRepo repository.GameRepository,
 	sectionRepo repository.SectionRepository,
-	cache service.CacheService,
 ) *DeleteGameUseCase {
 	return &DeleteGameUseCase{
 		gameRepo:    gameRepo,
 		sectionRepo: sectionRepo,
-		cache:       cache,
 	}
 }
 

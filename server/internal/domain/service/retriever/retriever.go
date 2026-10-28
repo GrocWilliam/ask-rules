@@ -9,7 +9,6 @@ import (
 
 	"ask-rules-server/internal/domain/entity"
 	"ask-rules-server/internal/domain/repository"
-	"ask-rules-server/internal/domain/service"
 	"ask-rules-server/internal/domain/service/nlp"
 )
 
@@ -35,27 +34,28 @@ const (
 	pageDecay = 0.005
 )
 
-// SearchOptions paramètres de recherche.
-type SearchOptions struct {
-	GameID      string
-	Question    string
-	Limit       int
-	Embedder    service.EmbedderService
-	SectionRepo repository.SectionRepository
+// Embedder calcule le vecteur d'une question.
+type Embedder interface {
+	Embed(ctx context.Context, text string) ([]float32, error)
+}
+
+// Retriever recherche les sections d'un jeu les plus pertinentes pour une question.
+type Retriever struct {
+	Embedder Embedder
+	Sections repository.SectionRepository
 	// MinVectorScore : seuil de similarité des résultats vectoriels
 	// (0 : defaultMinVectorScore, négatif : aucun seuil).
 	MinVectorScore float64
 }
 
 // Search effectue une recherche hybride et retourne les sections les plus pertinentes.
-func Search(ctx context.Context, opts SearchOptions) ([]entity.ScoredSection, error) {
-	limit := opts.Limit
+func (r *Retriever) Search(ctx context.Context, gameID, question string, limit int) ([]*entity.ScoredSection, error) {
 	if limit <= 0 {
 		limit = defaultLimit
 	}
 
 	// Embed la question
-	vec, embErr := opts.Embedder.Embed(ctx, opts.Question)
+	vec, embErr := r.Embedder.Embed(ctx, question)
 
 	var vectorResults, textResults []entity.ScoredSection
 
@@ -65,11 +65,10 @@ func Search(ctx context.Context, opts SearchOptions) ([]entity.ScoredSection, er
 		for i, f := range vec {
 			f64vec[i] = float64(f)
 		}
-		vr, err := opts.SectionRepo.VectorSearch(ctx, opts.GameID, f64vec, candidates(limit))
+		vr, err := r.Sections.VectorSearch(ctx, gameID, f64vec, candidates(limit))
 		if err != nil {
 			log.Printf("[retriever] VectorSearch: %v", err)
 		} else {
-			// Convertir []*entity.ScoredSection en []entity.ScoredSection
 			for _, s := range vr {
 				vectorResults = append(vectorResults, *s)
 			}
@@ -79,25 +78,29 @@ func Search(ctx context.Context, opts SearchOptions) ([]entity.ScoredSection, er
 	}
 
 	// Recherche plein texte (OR sur les mots-clés)
-	keywords := buildSearchQuery(opts.Question)
+	keywords := buildSearchQuery(question)
 	if keywords != "" {
-		tr, err := opts.SectionRepo.FullTextSearch(ctx, opts.GameID, keywords, candidates(limit))
+		tr, err := r.Sections.FullTextSearch(ctx, gameID, keywords, candidates(limit))
 		if err != nil {
 			log.Printf("[retriever] FullTextSearch: %v", err)
 		} else {
-			// Convertir []*entity.ScoredSection en []entity.ScoredSection
 			for _, s := range tr {
 				textResults = append(textResults, *s)
 			}
 		}
 	}
 
-	minScore := opts.MinVectorScore
+	minScore := r.MinVectorScore
 	if minScore == 0 {
 		minScore = defaultMinVectorScore
 	}
-	merged := mergeResults(vectorResults, textResults, limit, minScore)
-	return expandTop(ctx, opts.SectionRepo, merged), nil
+	merged := expandTop(ctx, r.Sections, mergeResults(vectorResults, textResults, limit, minScore))
+
+	result := make([]*entity.ScoredSection, len(merged))
+	for i := range merged {
+		result[i] = &merged[i]
+	}
+	return result, nil
 }
 
 // expandTopN : nombre de meilleures sections complétées par leurs voisines.

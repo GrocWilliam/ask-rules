@@ -39,10 +39,7 @@ func TestDeleteGameUseCase_Execute_Success(t *testing.T) {
 		},
 	}
 
-	cache := newMockCache()
-	cache.data["game:game-1"] = []byte(`{"test": "some cached data"}`)
-
-	uc := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo, cache)
+	uc := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo)
 
 	// Act
 	err := uc.Execute(context.Background(), "game-1")
@@ -59,9 +56,6 @@ func TestDeleteGameUseCase_Execute_Success(t *testing.T) {
 	if deletedSectionsGameID != "game-1" {
 		t.Errorf("Expected sections for 'game-1' to be deleted, got '%s'", deletedSectionsGameID)
 	}
-
-	// Note: Le cache n'est pas actuellement invalidé dans l'implémentation
-	// (design choice - le cache expire naturellement après 24h)
 }
 
 // Test : Jeu non trouvé
@@ -74,9 +68,8 @@ func TestDeleteGameUseCase_Execute_GameNotFound(t *testing.T) {
 	}
 
 	sectionRepo := &mockSectionRepo{}
-	cache := newMockCache()
 
-	uc := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo, cache)
+	uc := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo)
 
 	// Act
 	err := uc.Execute(context.Background(), "nonexistent")
@@ -111,9 +104,7 @@ func TestDeleteGameUseCase_Execute_SectionDeleteError(t *testing.T) {
 		},
 	}
 
-	cache := newMockCache()
-
-	uc := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo, cache)
+	uc := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo)
 
 	// Act
 	err := uc.Execute(context.Background(), "game-1")
@@ -147,9 +138,7 @@ func TestDeleteGameUseCase_Execute_GameDeleteError(t *testing.T) {
 		},
 	}
 
-	cache := newMockCache()
-
-	uc := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo, cache)
+	uc := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo)
 
 	// Act
 	err := uc.Execute(context.Background(), "game-1")
@@ -170,9 +159,8 @@ func TestDeleteGameUseCase_Execute_EmptyID(t *testing.T) {
 	}
 
 	sectionRepo := &mockSectionRepo{}
-	cache := newMockCache()
 
-	uc := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo, cache)
+	uc := usecase.NewDeleteGameUseCase(gameRepo, sectionRepo)
 
 	// Act
 	err := uc.Execute(context.Background(), "")
