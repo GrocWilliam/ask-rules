@@ -64,8 +64,11 @@
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
+      // complete/error terminent l'import : ne pas attendre la fermeture du flux,
+      // un proxy peut garder la connexion ouverte après la fin de la réponse
+      let finished = false;
 
-      while (true) {
+      while (!finished) {
         const { done, value } = await reader.read();
         if (done) break;
 
@@ -128,14 +131,17 @@
               action: 'indexé',
               mecaniques: [],
             };
+            finished = true;
           } else if (evt.type === 'file_error' || evt.type === 'section_error') {
             steps = [...steps, { message: `⚠ ${evt.error}` }];
           } else if (evt.type === 'error') {
             console.log(evt);
             result = { ok: false, error: (evt.error ?? evt.message) as string };
+            finished = true;
           }
         }
       }
+      if (finished) await reader.cancel().catch(() => {});
     } catch (err) {
       result = {
         ok: false,
