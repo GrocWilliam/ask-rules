@@ -8,55 +8,36 @@ Assistant IA pour interroger des règles de jeux de société en français.
 
 ## Architecture
 
-**Clean Architecture à 4 couches** :
+Un serveur Go découpé en paquets par rôle, sans couches : chaque paquet fait une chose, et un handler appelle directement `store` ou `files` quand il n'y a pas de logique à porter.
 
 ```
-ask-rules/
-├── server/
-│   ├── cmd/server/main.go       # Point d'entrée — DI, graceful shutdown
-│   ├── internal/
-│   │   ├── domain/              # Entités métier + interfaces (repository, service)
-│   │   │   ├── entity/          # Game, Section, User
-│   │   │   ├── repository/      # Interfaces pour persistence
-│   │   │   └── service/         # NLP (nlp/) et recherche hybride (retriever/)
-│   │   ├── application/         # Use cases (logique métier pure)
-│   │   │   └── usecase/         # AskQuestion, ImportGame, DeleteGame...
-│   │   ├── infrastructure/      # Implémentations concrètes
-│   │   │   ├── config/          # Chargement .env
-│   │   │   ├── persistence/     # PostgreSQL repositories + migration
-│   │   │   │   ├── db/          # Pool pgx v5
-│   │   │   │   └── postgres/    # Implémentations repository
-│   │   │   └── service/         # Embedder, LLM, Cache, Retriever, Pipeline
-│   │   └── interfaces/          # Adaptateurs HTTP/CLI
-│   │       └── http/
-│   │           ├── handler/     # AskHandler, GamesHandler...
-│   │           ├── middleware/  # AdminAuth, RateLimit
-│   │           └── router/      # Chi router + timeouts par route
-│   ├── .air.toml                # Live-reload Go (dev)
-│   └── build/                   # SvelteKit statique (go:embed)
-├── src/                         # Frontend SvelteKit (adapter-static)
-│   ├── routes/
-│   │   ├── +page.svelte         # Interface Q&A
-│   │   ├── import/              # Import SSE (heartbeat 15s)
-│   │   └── admin/               # Gestion jeux, fichiers, logs
-│   └── lib/                     # Composants (SEO, Markdown, PWA)
-├── static/
-│   ├── service-worker.js        # PWA avec exclusions /api/*
-│   └── manifest.json
-├── uploads/                     # Fichiers uploadés par jeu
-├── models/                      # ONNX (non versionné, téléchargé au build)
-│   └── multilingual-e5-small/
-├── Dockerfile                   # Multi-stage (web + Go CGO + runtime)
-└── .env.example
+server/
+├── cmd/server/main.go   # Point d'entrée : configuration, base, services, routes
+├── cmd/eval/            # Évaluation du retrieval et des réponses du LLM
+└── internal/
+    ├── config/          # Chargement du .env
+    ├── store/           # PostgreSQL : un fichier par table (games, sections, logs), migrations
+    ├── files/           # Fichiers uploadés (UPLOADS_DIR)
+    ├── embed/           # Embeddings ONNX (multilingual-e5-small)
+    ├── llm/             # Client chat/completions : retry, cadence, réveil d'un LLM en veille
+    ├── cache/           # Cache des réponses (Redis, sinon mémoire)
+    ├── nlp/             # Mots-clés, type de section, mécaniques, gameplay
+    ├── search/          # Recherche hybride (vectorielle + plein texte, fusion RRF)
+    ├── ask/             # Question → recherche → contexte → LLM → cache
+    ├── index/           # Import, découpage, indexation, réindexation, suppression des jeux
+    └── web/             # Handlers HTTP, routes Chi, middlewares, sessions admin
+src/                     # Frontend SvelteKit (SPA, adapter-static)
+static/                  # Service worker, manifest PWA
+deploy/nginx/            # nginx : sert le frontend, proxifie /api, /files et /health
+Dockerfile.backend       # Serveur Go (CGO + ONNX Runtime + modèle)
+Dockerfile.frontend      # Build SvelteKit servi par nginx
 ```
 
-**Points techniques clés** :
+Les dépendances vont dans un seul sens : `web` → `ask`, `index` → `search`, `llm`, `embed`, `files`, `nlp` → `store` → `config`.
 
-- **Dependency Injection** : Repositories injectés dans use cases via constructeurs
-- **Chi Router** : Middleware CORS, Logger, Recoverer, timeouts par route
-- **SSE Streaming** : Import avec heartbeat 15s pour éviter timeouts proxy/navigateur
-- **Logging** : `[ERROR]`/`[WARN]` avec contexte (handler, use case, game name)
-- **PWA** : Service Worker qui exclut `/api/*` et `text/event-stream`
+- **Logique** : `ask` (répondre à une question) et `index` (construire et maintenir les sections d'un jeu) ; les autres paquets sont des outils qu'ils utilisent.
+- **Interfaces** : seulement là où un test a besoin d'un faux, déclarées par le paquet qui les utilise (`ask.Searcher`, `ask.LLM`, `ask.Cache`, `search.Embedder`, `index.Processor`), plus les dépôts de `store` (`GameRepository`, `SectionRepository`, `LogRepository`).
+- **Câblage** : tout est construit dans `cmd/server/main.go`, sans framework d'injection.
 
 ---
 
@@ -223,12 +204,6 @@ volumes:
 
 ## Features techniques
 
-### Clean Architecture
-
-- **4 couches** : Domain (entities + interfaces) → Application (use cases) → Infrastructure (implémentations) → Interfaces (HTTP)
-- **Dependency Injection** : Repositories et services injectés via constructeurs
-- **Testabilité** : Interfaces mockables, use cases isolés de l'infra
-
 ### Chi Router
 
 - Middleware : Logger, Recoverer, RequestID, RealIP, CORS
@@ -241,16 +216,16 @@ volumes:
 
 ### SSE (Server-Sent Events)
 
-- Import avec **heartbeat 15s** : évite les timeouts proxy/navigateur sur longues importations
+- Import avec **heartbeat 10s** : évite les timeouts proxy/navigateur sur longues importations
 - Thread-safe : `sync.Mutex` sur les envois concurrents
 - Context cancellation : arrêt propre du heartbeat
 - Frontend : ignore les événements `ping`
 
 ### Logging
 
-- Format : `[ERROR]` / `[WARN]` avec contexte (handler, use case, game name)
+- Format : `[ERROR]` / `[WARN]` avec contexte (route, opération, nom du jeu)
 - **Tous les handlers** : logs à chaque erreur HTTP
-- **Use cases** : logs des erreurs métier (game not found, LLM failure, etc.)
+- **`ask` et `index`** : logs des erreurs métier (jeu introuvable, échec du LLM, etc.)
 - Aide au debugging : nom du jeu, opération, erreur originale
 
 ### PWA & Service Worker
@@ -263,9 +238,9 @@ volumes:
 
 ### Migration automatique
 
-- Exécutée au démarrage (`db.Migrate()`)
+- Exécutée au démarrage (`store.Migrate()`)
 - Idempotente : `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`
-- Extensions : `pgvector`, `pg_trgm` (full-text search)
+- Extension : `pgvector` ; plein texte natif PostgreSQL (`tsvector`, configuration `french`)
 
 ---
 
@@ -308,21 +283,22 @@ volumes:
 | `DELETE` | `/api/admin/files/{slug}/{filename}` | Supprimer un fichier                                              |
 | `GET`    | `/api/admin/logs`                    | Logs récents (`?limit=N`)                                         |
 | `POST`   | `/api/import`                        | Importer un fichier (SSE) — page `/import`, après connexion admin |
-| `POST`   | `/api/admin/reprocess`               | Retraiter un jeu (SSE)                                            |
+| `POST`   | `/api/admin/games/{id}/reprocess`    | Retraiter un jeu (SSE)                                            |
 | `POST`   | `/api/admin/reprocess-all`           | Retraiter tous les jeux (SSE)                                     |
+| `GET`    | `/api/admin/jobs/{id}`               | Statut d'un retraitement en cours ou terminé                      |
+| `GET`    | `/api/admin/jobs/{id}/stream`        | Se reconnecter au flux SSE d'un retraitement                      |
 
 ---
 
 ## Embeddings
 
-Le service `internal/infrastructure/service/onnx_embedder_adapter.go` charge le modèle **multilingual-e5-small** directement via `onnxruntime_go` (CGO). Aucun serveur Python requis.
+Le paquet `internal/embed` (`onnx.go`) charge le modèle **multilingual-e5-small** directement via `onnxruntime_go` (CGO). Aucun serveur Python requis.
 
 - **Dimensions** : 384, jusqu'à 512 tokens
 - **Langue** : multilingue (optimal pour le français)
 - **Modèle quantifié int8** utilisé en priorité s'il est présent (`onnx/model_quantized.onnx`)
 - **Préfixes E5** : `query: ` pour les questions (`Embed`), `passage: ` pour les sections indexées (`EmbedPassage`)
 - **Session ONNX** : shapes dynamiques (tensors à la taille réelle du texte), arène mémoire désactivée, libérée après 5 min d'inactivité
-- **Repository pattern** : Interface `EmbedderService` dans domain, implémentation dans infrastructure
 
 Si `libonnxruntime.so` ou le modèle est absent au démarrage, le serveur continue sans embeddings (recherche full-text uniquement).
 
@@ -330,7 +306,7 @@ Si `libonnxruntime.so` ou le modèle est absent au démarrage, le serveur contin
 
 ## Recherche hybride
 
-`internal/domain/service/retriever/retriever.go` combine :
+`internal/search/search.go` combine :
 
 1. **Recherche vectorielle** — cosinus via `pgvector` (index HNSW)
 2. **Full-text search** — `websearch_to_tsquery('french', 'terme1 or terme2 ...')` sur `tsvector` pondéré (titre A, hierarchy_path B, contenu C)
@@ -349,7 +325,7 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5433/askrules_eval go run 
 
 Relancer l'évaluation avant/après toute modification du chunking, du modèle ou du retriever.
 
-Les repositories PostgreSQL gèrent les requêtes SQL (separation of concerns), le retriever orchestre la fusion.
+Les requêtes SQL sont dans `internal/store/sections.go`, la fusion dans `internal/search`.
 
 ---
 
@@ -364,7 +340,7 @@ Accessible sur `/admin` (mot de passe via `ADMIN_PASSWORD`) :
 
 ## Choix du modèle
 
-Modèle actuel : **Gemma 3 1B** (avant : un Qwen d'environ 0,8B). Le prompt (`server/internal/infrastructure/service/llm_adapter.go`) est écrit pour un modèle de cette taille : consignes courtes et numérotées, exemples de format, un seul message utilisateur (rejouer les échanges précédents faisait répondre « Oui » tout court au bout de quelques questions).
+Modèle actuel : **Gemma 3 1B** (avant : un Qwen d'environ 0,8B). Le prompt (`server/internal/llm/client.go`) est écrit pour un modèle de cette taille : consignes courtes et numérotées, exemples de format, un seul message utilisateur (rejouer les échanges précédents faisait répondre « Oui » tout court au bout de quelques questions).
 
 À cette taille, attendez-vous à un français parfois maladroit (voire des réponses en anglais), à des consignes suivies imparfaitement, et à des règles ou des pages inventées. Si c'est fréquent, envoyer 4 sections au lieu de 6 raccourcit le contexte.
 
