@@ -21,3 +21,9 @@ type ChatTurn struct {
 	Question string `json:"question"`
 	Answer   string `json:"answer"`
 }
+
+// Message est un message de l'API chat/completions (role : system, user, assistant).
+type Message struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}

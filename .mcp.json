@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ask-rules": {
+      "command": "go",
+      "args": ["-C", "server", "run", "./cmd/mcp"]
+    }
+  }
+}

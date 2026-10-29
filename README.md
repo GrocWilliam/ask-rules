@@ -2,7 +2,7 @@
 
 Assistant IA pour interroger des règles de jeux de société en français.
 
-**Stack** : Go 1.22 · SvelteKit (SPA) · PostgreSQL + pgvector · ONNX Runtime
+**Stack** : Go 1.25 · SvelteKit (SPA) · PostgreSQL + pgvector · ONNX Runtime
 
 ---
 
@@ -14,6 +14,7 @@ Un serveur Go découpé en paquets par rôle, sans couches : chaque paquet fait 
 server/
 ├── cmd/server/main.go   # Point d'entrée : configuration, base, services, routes
 ├── cmd/eval/            # Évaluation du retrieval et des réponses du LLM
+├── cmd/mcp/             # Serveur MCP : base et LLM déployés pour un assistant
 └── internal/
     ├── config/          # Chargement du .env
     ├── store/           # PostgreSQL : un fichier par table (games, sections, logs), migrations
@@ -43,7 +44,7 @@ Les dépendances vont dans un seul sens : `web` → `ask`, `index` → `search`,
 
 ## Prérequis
 
-- **Go 1.22+**
+- **Go 1.25+**
 - **Node.js 18+ + pnpm**
 - **PostgreSQL 14+** avec l'extension `pgvector`
 - **libonnxruntime.so 1.20.0** (voir ci-dessous)
@@ -323,6 +324,32 @@ DATABASE_URL=postgresql://postgres:postgres@localhost:5433/askrules_eval go run 
 Relancer l'évaluation avant/après toute modification du chunking, du modèle ou du retriever.
 
 Les requêtes SQL sont dans `internal/store/sections.go`, la fusion dans `internal/search`.
+
+---
+
+## Serveur MCP
+
+`server/cmd/mcp` donne à un assistant (Claude Code…) un accès à la base et au LLM configurés dans `.env`, via MCP en stdio. Il est déclaré dans `.mcp.json` : Claude Code le propose à l'ouverture du projet.
+
+| Outil             | Rôle                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| `db_schema`       | Tables du schéma `public`, colonnes et nombre approximatif de lignes                                          |
+| `db_query`        | Une instruction SQL dans une transaction en lecture seule (15 s max, 100 lignes par défaut, 1000 max)         |
+| `llm_chat`        | Messages bruts envoyés au LLM (`chat/completions`), sans le prompt de l'arbitre                               |
+| `llm_answer_rule` | Question + extraits du livret, avec le prompt de `/api/ask` (sans recherche ni cache) : pour tester le prompt |
+
+Les migrations ne sont jamais lancées. Le LLM en veille est réveillé comme pour `/api/ask` (`LLM_HEALTH_URL`).
+Pour une base de production, préférez un rôle PostgreSQL en lecture seule, passé dans `MCP_DATABASE_URL` (prioritaire sur `DATABASE_URL`) :
+
+```sql
+CREATE ROLE askrules_ro LOGIN PASSWORD '…';
+GRANT CONNECT ON DATABASE railway TO askrules_ro;
+GRANT USAGE ON SCHEMA public TO askrules_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO askrules_ro;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO askrules_ro;
+```
+
+Lancement manuel (depuis `server/`) : `go run ./cmd/mcp`. Ailleurs que Claude Code (Claude Desktop…), déclarez la commande `go -C <chemin>/server run ./cmd/mcp`.
 
 ---
 

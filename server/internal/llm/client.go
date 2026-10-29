@@ -121,7 +121,12 @@ func (m *Client) Query(ctx context.Context, question, contextText string, histor
 		strip = &fillerStripper{out: onToken}
 		onToken = strip.write
 	}
-	resp, err := m.query(ctx, question, contextText, history, onToken)
+	resp, err := m.query(ctx, chatRequest{
+		Messages:         buildMessages(question, contextText, history),
+		MaxTokens:        llmMaxTokens,
+		Temperature:      0.3,
+		FrequencyPenalty: llmFrequencyPenalty,
+	}, onToken)
 	if err != nil {
 		return nil, err
 	}
@@ -182,12 +187,29 @@ func (m *Client) Warmup() {
 	}
 }
 
+// Chat envoie des messages tels quels, sans le prompt de l'arbitre ni le
+// nettoyage de la réponse : pour tester le modèle déployé (serveur MCP).
+func (m *Client) Chat(ctx context.Context, messages []Message, maxTokens int, temperature float64) (*Response, error) {
+	if m.provider == nil {
+		return nil, fmt.Errorf("LLM_BASE_URL non défini")
+	}
+	resp, err := m.query(ctx, chatRequest{
+		Messages:    messages,
+		MaxTokens:   maxTokens,
+		Temperature: temperature,
+	}, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // query attend le réveil du LLM s'il est en veille, puis l'interroge.
 // Un échec juste après un contrôle de santé positif (serveur rendormi, modèle
 // en cours de rechargement…) relance le réveil et l'appel une fois.
 // En streaming, pas de nouvel essai une fois du texte transmis : la réponse
 // recommencerait depuis le début.
-func (m *Client) query(ctx context.Context, question, ctxText string, history []ChatTurn, onToken func(string)) (Response, error) {
+func (m *Client) query(ctx context.Context, req chatRequest, onToken func(string)) (Response, error) {
 	llmProvider := *m.provider
 	streamed := false
 	if onToken != nil {
@@ -205,7 +227,7 @@ func (m *Client) query(ctx context.Context, question, ctxText string, history []
 			}
 		}
 
-		resp, err := m.queryChat(ctx, llmProvider, llmMaxRetries, question, ctxText, history, onToken)
+		resp, err := m.queryChat(ctx, llmProvider, llmMaxRetries, req, onToken)
 		if llmProvider.health == nil {
 			return resp, err
 		}
@@ -225,18 +247,13 @@ func (m *Client) query(ctx context.Context, question, ctxText string, history []
 
 // ── API chat/completions ────────────────────────────────
 
-type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
 type chatRequest struct {
-	Model            string        `json:"model,omitempty"`
-	Messages         []chatMessage `json:"messages"`
-	MaxTokens        int           `json:"max_tokens"`
-	Temperature      float64       `json:"temperature"`
-	FrequencyPenalty float64       `json:"frequency_penalty"`
-	Stream           bool          `json:"stream,omitempty"`
+	Model            string    `json:"model,omitempty"`
+	Messages         []Message `json:"messages"`
+	MaxTokens        int       `json:"max_tokens"`
+	Temperature      float64   `json:"temperature"`
+	FrequencyPenalty float64   `json:"frequency_penalty"`
+	Stream           bool      `json:"stream,omitempty"`
 }
 
 type chatResponse struct {
@@ -262,7 +279,7 @@ type chatResponse struct {
 // rejouer les échanges en tours user/assistant faisait imiter les réponses
 // précédentes à un petit modèle, jusqu'à répondre « Oui » tout court.
 // Seuls le sujet (questions précédentes) et la dernière réponse sont rappelés.
-func buildMessages(question, ctxText string, history []ChatTurn) []chatMessage {
+func buildMessages(question, ctxText string, history []ChatTurn) []Message {
 	var b strings.Builder
 	// Pas de consigne à l'impératif ici : un petit modèle y répond par « Ok, … ».
 	// Le rappel de ne citer que les extraits reste dans le titre, au plus près de la question.
@@ -276,7 +293,7 @@ func buildMessages(question, ctxText string, history []ChatTurn) []chatMessage {
 	}
 
 	b.WriteString("Question : " + question)
-	return []chatMessage{
+	return []Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: b.String()},
 	}
@@ -313,21 +330,16 @@ func chatContentText(raw json.RawMessage) (string, error) {
 	return b.String(), nil
 }
 
-func (m *Client) queryChat(ctx context.Context, llmProvider chatProvider, maxRetries int, question, ctxText string, history []ChatTurn, onToken func(string)) (Response, error) {
+func (m *Client) queryChat(ctx context.Context, llmProvider chatProvider, maxRetries int, req chatRequest, onToken func(string)) (Response, error) {
 	if llmProvider.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, llmProvider.timeout)
 		defer cancel()
 	}
 
-	body, _ := json.Marshal(chatRequest{
-		Model:            llmProvider.model,
-		Messages:         buildMessages(question, ctxText, history),
-		MaxTokens:        llmMaxTokens,
-		Temperature:      0.3,
-		FrequencyPenalty: llmFrequencyPenalty,
-		Stream:           onToken != nil,
-	})
+	req.Model = llmProvider.model
+	req.Stream = onToken != nil
+	body, _ := json.Marshal(req)
 
 	headers := map[string]string{}
 	if llmProvider.apiKey != "" {
@@ -366,7 +378,7 @@ func (m *Client) queryChat(ctx context.Context, llmProvider chatProvider, maxRet
 	}
 
 	if choice.FinishReason == "length" {
-		log.Printf("[WARN] %s - réponse tronquée à %d tokens (id=%s)", llmProvider.name, llmMaxTokens, result.ID)
+		log.Printf("[WARN] %s - réponse tronquée à %d tokens (id=%s)", llmProvider.name, req.MaxTokens, result.ID)
 	}
 
 	return Response{
