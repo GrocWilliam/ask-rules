@@ -20,7 +20,7 @@ Each of these is backed by a comment in the code. Keep them unless an eval shows
 
   | Setting               | Value | Why                                                                |
   | --------------------- | ----- | ------------------------------------------------------------------ |
-  | `llmMaxTokens`        | 400   | About twice the 150-word limit; also cuts off loops                |
+  | `llmMaxTokens`        | 1024  | Room for long lists without cutting mid-answer; still stops loops  |
   | `llmFrequencyPenalty` | 0.3   | Low, so normal repeated words ("tuile", "joueur") aren't penalised |
   | temperature           | 0.3   |                                                                    |
 

@@ -38,7 +38,7 @@ const (
 	// maxValueLen : longueur max d'une valeur texte (les embeddings font ~8 Ko)
 	maxValueLen = 1000
 	// defaultMaxTokens : longueur max d'une réponse de llm_chat
-	defaultMaxTokens = 400
+	defaultMaxTokens = 1024
 )
 
 func main() {
@@ -231,7 +231,7 @@ func truncate(s string) string {
 
 type llmChatInput struct {
 	Messages    []llm.Message `json:"messages" jsonschema:"messages de la conversation (role : system, user ou assistant)"`
-	MaxTokens   int           `json:"max_tokens,omitempty" jsonschema:"longueur max de la réponse (défaut 400)"`
+	MaxTokens   int           `json:"max_tokens,omitempty" jsonschema:"longueur max de la réponse (défaut 1024)"`
 	Temperature *float64      `json:"temperature,omitempty" jsonschema:"température (défaut 0.3)"`
 }
 

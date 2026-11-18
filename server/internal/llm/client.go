@@ -42,9 +42,9 @@ Format :
 // retiré malgré la consigne du prompt qu'un petit modèle ne suit pas toujours.
 var fillerOpening = regexp.MustCompile(`(?i)^\s*(ok|okay|d'accord|d’accord|bien sûr|très bien)\b\s*[,.!:]?\s*`)
 
-// llmMaxTokens : longueur max d'une réponse (~300 mots), le double des 150 mots
+// llmMaxTokens : longueur max d'une réponse (~750 mots), large marge sur les 150 mots
 // demandés par le prompt. Coupe aussi vite une réponse qui tourne en boucle.
-const llmMaxTokens = 400
+const llmMaxTokens = 1024
 
 // llmFrequencyPenalty : pénalise les tokens déjà produits, contre les boucles
 // d'un petit modèle (même paragraphe répété jusqu'à max_tokens). Faible pour

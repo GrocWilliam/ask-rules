@@ -75,7 +75,7 @@ Section 1: <titre> (p. <page_debut>[-<page_fin>])
 Pass it to `llm_answer_rule` with the player's question (plus `history` for a follow-up):
 
 - **Wrong answer with the right sections:** an **LLM or prompt** fault; see the `tune-prompt` skill.
-- **Right answer with the right sections:** production didn't send those sections. That's **retrieval** (`internal/search`, `nlp`, `VECTOR_MIN_SCORE`, the 6-result limit) or the **context budget** (`maxContextRunes` 4500 in `internal/ask/ask.go` dropping it).
+- **Right answer with the right sections:** production didn't send those sections. That's **retrieval** (`internal/search`, `nlp`, `VECTOR_MIN_SCORE`, the 6-result limit) or the **context budget** (`maxContextRunes` 7000 in `internal/ask/ask.go` dropping it).
 
 ## 5. Report
 

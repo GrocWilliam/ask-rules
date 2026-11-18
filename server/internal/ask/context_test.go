@@ -77,7 +77,7 @@ func TestFitContextBudget(t *testing.T) {
 	}
 
 	// c dépasse le budget restant et est sautée, d (courte) passe encore
-	got := fitContextBudget([]*store.ScoredSection{sec("a", 2000), sec("b", 2000), sec("c", 1000), sec("d", 400)})
+	got := fitContextBudget([]*store.ScoredSection{sec("a", maxContextRunes/2-200), sec("b", maxContextRunes/2-200), sec("c", 1000), sec("d", 400)})
 	if ids(got) != "abd" {
 		t.Fatalf("sections gardées : %s, attendu abd", ids(got))
 	}

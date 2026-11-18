@@ -304,11 +304,11 @@ func (s *Service) search(ctx context.Context, gameID, question string, history [
 	return interleave(own, enriched, limit), nil
 }
 
-// maxContextRunes : taille max des extraits envoyés au LLM (~1 300 tokens).
+// maxContextRunes : taille max des extraits envoyés au LLM (~2 000 tokens).
 // C'est la taille, pas le nombre de sections, qui fixe la latence : mesuré sur
 // Gemma 3 4B (CPU), ~3 300 caractères → premier mot en 4,5-8 s, ~5 800 → 9-15 s.
-// 4 500 laisse passer les 2 sections étendues (jusqu'à ~2 100 chacune).
-const maxContextRunes = 4500
+// 7 000 laisse passer 3 sections étendues (jusqu'à ~2 100 chacune), au prix de la latence.
+const maxContextRunes = 7000
 
 // fitContextBudget garde les sections, dans l'ordre de pertinence, tant
 // qu'elles tiennent dans maxContextRunes. Une section trop longue est sautée
