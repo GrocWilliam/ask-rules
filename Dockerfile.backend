@@ -7,17 +7,16 @@ ARG ONNX_VERSION
 WORKDIR /workspace
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ ca-certificates curl \
+    gcc g++ ca-certificates curl unzip \
     && rm -rf /var/lib/apt/lists/*
 
+# Le dépôt GitHub microsoft/onnxruntime ne répond plus (404) : même build via NuGet
 RUN curl -fsSL \
-    "https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VERSION}/onnxruntime-linux-x64-${ONNX_VERSION}.tgz" \
-    -o /tmp/ort.tgz \
-    && tar -xzf /tmp/ort.tgz -C /tmp \
-    && cp /tmp/onnxruntime-linux-x64-${ONNX_VERSION}/lib/libonnxruntime.so.${ONNX_VERSION} \
-          /usr/local/lib/libonnxruntime.so \
+    "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/${ONNX_VERSION}/microsoft.ml.onnxruntime.${ONNX_VERSION}.nupkg" \
+    -o /tmp/ort.nupkg \
+    && unzip -p /tmp/ort.nupkg runtimes/linux-x64/native/libonnxruntime.so > /usr/local/lib/libonnxruntime.so \
     && ldconfig \
-    && rm -rf /tmp/ort*
+    && rm -f /tmp/ort.nupkg
 
 COPY server/go.mod server/go.sum ./server/
 RUN cd server && go mod download

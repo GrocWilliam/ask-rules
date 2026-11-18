@@ -53,9 +53,9 @@ Les dépendances vont dans un seul sens : `web` → `ask`, `index` → `search`,
 
 ```bash
 # Linux x64 (version 1.20.0 pour correspondre au Dockerfile)
-curl -fsSL https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/onnxruntime-linux-x64-1.20.0.tgz \
-  | tar -xz --strip-components=2 -C /usr/local/lib '*/lib/libonnxruntime.so.1.20.0'
-mv /usr/local/lib/libonnxruntime.so.1.20.0 /usr/local/lib/libonnxruntime.so
+curl -fsSL https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.20.0/microsoft.ml.onnxruntime.1.20.0.nupkg -o /tmp/ort.nupkg
+unzip -p /tmp/ort.nupkg runtimes/linux-x64/native/libonnxruntime.so > /usr/local/lib/libonnxruntime.so
+rm /tmp/ort.nupkg
 ldconfig
 ```
 
