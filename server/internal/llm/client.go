@@ -28,23 +28,23 @@ Consignes :
 2. Utilise seulement les extraits qui concernent la question, ignore les autres.
 3. Si la question est courte (« et pour… ? »), elle porte sur le sujet des questions précédentes.
 4. Si les extraits ne donnent pas la réponse, réponds : « Je ne trouve pas cette règle dans le livret. »
-5. Réponds en français, en 80 mots au plus (150 pour une liste).
+5. Réponds en français. Sois complet : donne tous les détails utiles des extraits (conditions, exceptions, coûts, cas particuliers).
 6. Commence directement par la règle : jamais « Ok », « D'accord », « Bien sûr » ni reformulation de la question.
 7. « Oui » ou « Non » seulement pour une question fermée (« Peut-on… ? », « Est-ce que… ? »).
 8. Les extraits sont rangés par chapitre. Ne mélange jamais deux chapitres : si la règle diffère selon le chapitre (mode de jeu, extension…), donne-la pour chacun en le nommant.
 
 Format :
 - Première ligne : la réponse directe en gras, avec la page entre parenthèses.
-- Ensuite, seulement si utile : 1 à 3 précisions en liste, chacune avec sa page.
+- Ensuite : toutes les précisions utiles en liste (conditions, exceptions, exemples du livret), chacune avec sa page.
 - Si la question demande de présenter ou lister (types, phases, actions…) : une ligne de liste par élément, avec sa page.`
 
 // fillerOpening : accusé de réception en tête de réponse (« Ok, », « D'accord. »…),
 // retiré malgré la consigne du prompt qu'un petit modèle ne suit pas toujours.
 var fillerOpening = regexp.MustCompile(`(?i)^\s*(ok|okay|d'accord|d’accord|bien sûr|très bien)\b\s*[,.!:]?\s*`)
 
-// llmMaxTokens : longueur max d'une réponse (~750 mots), large marge sur les 150 mots
-// demandés par le prompt. Coupe aussi vite une réponse qui tourne en boucle.
-const llmMaxTokens = 1024
+// llmMaxTokens : longueur max d'une réponse (~1500 mots) ; le prompt ne fixe pas de
+// limite de mots. Coupe aussi vite une réponse qui tourne en boucle.
+const llmMaxTokens = 2048
 
 // llmFrequencyPenalty : pénalise les tokens déjà produits, contre les boucles
 // d'un petit modèle (même paragraphe répété jusqu'à max_tokens). Faible pour
