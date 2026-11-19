@@ -1,20 +1,21 @@
 <svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+      <stop offset="0%" style="stop-color:#f2b632;stop-opacity:1" />
+      <stop offset="55%" style="stop-color:#e0592a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#c2372a;stop-opacity:1" />
     </linearGradient>
   </defs>
   
   <!-- Background -->
-  <rect width="1200" height="630" fill="url(#bgGrad)"/>
+  <rect width="1200" height="630" fill="#fbf3e4"/>
   
   <!-- Subtle pattern overlay -->
-  <g opacity="0.1">
-    <circle cx="100" cy="100" r="50" fill="white"/>
-    <circle cx="1100" cy="530" r="80" fill="white"/>
-    <circle cx="300" cy="500" r="40" fill="white"/>
-    <circle cx="900" cy="150" r="60" fill="white"/>
+  <g opacity="0.35">
+    <circle cx="100" cy="100" r="50" fill="#e0592a"/>
+    <circle cx="1100" cy="530" r="80" fill="#f2b632"/>
+    <circle cx="300" cy="500" r="40" fill="#2e8f5e"/>
+    <circle cx="1090" cy="90" r="60" fill="#2a6fa8"/>
   </g>
   
   <!-- Main content container -->
@@ -22,32 +23,32 @@
     <!-- Game die icon -->
     <g transform="translate(-350, 0)">
       <rect x="-80" y="-80" width="160" height="160" 
-            fill="none" stroke="white" stroke-width="8" rx="16"/>
+            fill="url(#bgGrad)" stroke="none" stroke-width="8" rx="16"/>
       
       <!-- Dice dots (5 pattern) -->
-      <circle cx="-40" cy="-40" r="12" fill="white"/>
-      <circle cx="40" cy="-40" r="12" fill="white"/>
-      <circle cx="0" cy="0" r="12" fill="white"/>
-      <circle cx="-40" cy="40" r="12" fill="white"/>
-      <circle cx="40" cy="40" r="12" fill="white"/>
+      <circle cx="-40" cy="-40" r="12" fill="#fffaf2"/>
+      <circle cx="40" cy="-40" r="12" fill="#fffaf2"/>
+      <circle cx="0" cy="0" r="12" fill="#fffaf2"/>
+      <circle cx="-40" cy="40" r="12" fill="#fffaf2"/>
+      <circle cx="40" cy="40" r="12" fill="#fffaf2"/>
     </g>
     
     <!-- Text content -->
-    <g transform="translate(100, 0)">
+    <g transform="translate(-180, 0)">
       <!-- Title -->
       <text x="0" y="-40" 
             text-anchor="start" 
-            fill="white" 
-            font-family="Arial, sans-serif" 
+            fill="#3d2b1f" 
+            font-family="Fredoka, Nunito, 'Arial Rounded MT Bold', Arial, sans-serif" 
             font-size="72" 
             font-weight="bold">Reglomatic</text>
       
       <!-- Subtitle -->
       <text x="0" y="40" 
             text-anchor="start" 
-            fill="white" 
-            opacity="0.9"
-            font-family="Arial, sans-serif" 
+            fill="#7a5f4c" 
+            opacity="1"
+            font-family="Fredoka, Nunito, 'Arial Rounded MT Bold', Arial, sans-serif" 
             font-size="32" 
             font-weight="normal">Posez vos questions sur les règles de jeu</text>
     </g>
@@ -56,8 +57,8 @@
   <!-- Bottom tag -->
   <text x="600" y="580" 
         text-anchor="middle" 
-        fill="white" 
-        opacity="0.7"
-        font-family="Arial, sans-serif" 
+        fill="#8f7562" 
+        opacity="1"
+        font-family="Fredoka, Nunito, 'Arial Rounded MT Bold', Arial, sans-serif" 
         font-size="24">Powered by AI | RAG System</text>
 </svg>

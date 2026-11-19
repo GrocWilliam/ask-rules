@@ -1,8 +1,9 @@
 <svg width="192" height="192" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+      <stop offset="0%" style="stop-color:#f2b632;stop-opacity:1" />
+      <stop offset="55%" style="stop-color:#e0592a;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#c2372a;stop-opacity:1" />
     </linearGradient>
   </defs>
   
@@ -12,20 +13,20 @@
   <!-- Icon content - Game die -->
   <g transform="translate(96, 96)">
     <rect x="-40" y="-40" width="80" height="80" 
-          fill="none" stroke="white" stroke-width="6" rx="8"/>
+          fill="#fffaf2" stroke="#fffaf2" stroke-width="6" rx="8"/>
     
     <!-- Dice dots (5 pattern) -->
-    <circle cx="-22" cy="-22" r="7" fill="white"/>
-    <circle cx="22" cy="-22" r="7" fill="white"/>
-    <circle cx="0" cy="0" r="7" fill="white"/>
-    <circle cx="-22" cy="22" r="7" fill="white"/>
-    <circle cx="22" cy="22" r="7" fill="white"/>
+    <circle cx="-22" cy="-22" r="7" fill="#c2372a"/>
+    <circle cx="22" cy="-22" r="7" fill="#c2372a"/>
+    <circle cx="0" cy="0" r="7" fill="#c2372a"/>
+    <circle cx="-22" cy="22" r="7" fill="#c2372a"/>
+    <circle cx="22" cy="22" r="7" fill="#c2372a"/>
   </g>
   
   <!-- Text AR -->
   <text x="96" y="165" 
         text-anchor="middle" 
-        fill="white" 
+        fill="#fffaf2" 
         font-family="Arial, sans-serif" 
         font-size="24" 
         font-weight="bold">AR</text>
