@@ -14,6 +14,12 @@ export const GET: RequestHandler = async ({ url }) => {
     <priority>1.0</priority>
   </url>
   <url>
+    <loc>${baseUrl}/question</loc>
+    <lastmod>${new Date().toISOString()}</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>${baseUrl}/import</loc>
     <lastmod>${new Date().toISOString()}</lastmod>
     <changefreq>monthly</changefreq>

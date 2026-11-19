@@ -2,7 +2,7 @@
   "name": "Reglomatic - Assistant IA pour jeux de société",
   "short_name": "Reglomatic",
   "description": "Posez des questions sur vos règles de jeux de société et obtenez des réponses instantanées grâce à notre IA",
-  "start_url": "/",
+  "start_url": "/question",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#4f46e5",
