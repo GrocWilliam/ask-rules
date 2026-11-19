@@ -56,7 +56,7 @@
 
   .markdown-content :global(strong) {
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.95);
+    color: color-mix(in srgb, var(--text) 95%, transparent);
   }
 
   .markdown-content :global(em) {
@@ -64,7 +64,7 @@
   }
 
   .markdown-content :global(code) {
-    background: rgba(255, 255, 255, 0.1);
+    background: color-mix(in srgb, var(--text) 10%, transparent);
     padding: 0.125rem 0.375rem;
     border-radius: 0.25rem;
     font-family: 'Courier New', monospace;
@@ -72,7 +72,7 @@
   }
 
   .markdown-content :global(pre) {
-    background: rgba(255, 255, 255, 0.05);
+    background: color-mix(in srgb, var(--text) 5%, transparent);
     padding: 0.75rem;
     border-radius: 0.5rem;
     overflow-x: auto;
@@ -117,20 +117,20 @@
   }
 
   .markdown-content :global(blockquote) {
-    border-left: 3px solid rgba(255, 255, 255, 0.3);
+    border-left: 3px solid color-mix(in srgb, var(--text) 30%, transparent);
     padding-left: 1rem;
     margin: 0.75rem 0;
-    color: rgba(255, 255, 255, 0.8);
+    color: color-mix(in srgb, var(--text) 80%, transparent);
   }
 
   .markdown-content :global(hr) {
     border: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    border-top: 1px solid color-mix(in srgb, var(--text) 20%, transparent);
     margin: 1rem 0;
   }
 
   .markdown-content :global(a) {
-    color: #6eb5ff;
+    color: var(--blue);
     text-decoration: none;
   }
 

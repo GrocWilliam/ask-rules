@@ -4,8 +4,8 @@
   "description": "Posez des questions sur vos règles de jeux de société et obtenez des réponses instantanées grâce à notre IA",
   "start_url": "/question",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#4f46e5",
+  "background_color": "#fbf3e4",
+  "theme_color": "#e0592a",
   "orientation": "portrait-primary",
   "icons": [
     {

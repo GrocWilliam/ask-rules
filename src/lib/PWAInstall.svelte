@@ -111,7 +111,7 @@
     right: 1rem;
     max-width: 500px;
     margin: 0 auto;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: var(--logo-gradient);
     color: white;
     border-radius: 12px;
     padding: 1rem;
@@ -170,7 +170,7 @@
 
   .btn-install {
     background: white;
-    color: #667eea;
+    color: #b5431b; /* bouton toujours blanc, quel que soit le thème */
     border: none;
     padding: 0.625rem 1.25rem;
     border-radius: 8px;

@@ -180,25 +180,10 @@
     }, 150);
   }
 
-  const suggestedQuestions = [
-    'Comment jouer ?',
-    'Comment gagner ?',
-    'Comment se déroule un tour ?',
-    'Quelles sont les actions disponibles ?',
-  ];
-
   function handleTextareaKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       formEl.requestSubmit();
-    }
-  }
-
-  function fillQuestion(question: string) {
-    questionText = question;
-    const textarea = formEl.querySelector('textarea[name="question"]') as HTMLTextAreaElement;
-    if (textarea) {
-      textarea.focus();
     }
   }
 
@@ -411,21 +396,6 @@
 
   <!-- Formulaire (fixé en bas) -->
   <form bind:this={formEl} class="ask-form" on:submit|preventDefault={handleSubmit}>
-    {#if !current}
-      <div class="suggested-tags">
-        {#each suggestedQuestions as question, index (index)}
-          <button
-            type="button"
-            class="tag-btn"
-            on:click={() => fillQuestion(question)}
-            disabled={isLoading}
-          >
-            {question}
-          </button>
-        {/each}
-      </div>
-    {/if}
-
     <div class="question-wrapper">
       <textarea
         name="question"
@@ -634,7 +604,7 @@
 
   /* Citations de pages cliquables dans les réponses */
   .answer-text :global(a.citation) {
-    color: #c4b5fd;
+    color: var(--accent-text);
     text-decoration: underline dotted;
     text-underline-offset: 2px;
     white-space: nowrap;
@@ -684,42 +654,6 @@
     color: var(--text-muted);
   }
 
-  .suggested-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
-  }
-
-  .tag-btn {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 1rem;
-    padding: 0.4rem 0.9rem;
-    font-size: 0.875rem;
-    color: rgba(255, 255, 255, 0.75);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-family: inherit;
-    white-space: nowrap;
-  }
-
-  .tag-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.12);
-    border-color: rgba(255, 255, 255, 0.3);
-    color: rgba(255, 255, 255, 0.95);
-    transform: translateY(-1px);
-  }
-
-  .tag-btn:active:not(:disabled) {
-    transform: translateY(0);
-  }
-
-  .tag-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
   .question-wrapper {
     position: relative;
     width: 100%;
@@ -730,8 +664,8 @@
     bottom: 0.5rem;
     right: 0.75rem;
     font-size: 0.75rem;
-    color: rgba(255, 200, 100, 0.8);
-    background: rgba(0, 0, 0, 0.3);
+    color: var(--text-muted);
+    background: var(--surface-2);
     padding: 0.25rem 0.5rem;
     border-radius: 0.375rem;
     backdrop-filter: blur(4px);
@@ -740,7 +674,7 @@
   }
 
   .char-counter.danger {
-    color: rgba(255, 100, 100, 0.9);
+    color: var(--red);
     font-weight: 600;
   }
 
@@ -755,10 +689,10 @@
   .game-search-input {
     width: 100%;
     padding: 0.6rem 2.4rem 0.6rem 0.9rem;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
     border-radius: 0.5rem;
-    color: #fff;
+    color: var(--text);
     font-size: 0.95rem;
     font-family: inherit;
     outline: none;
@@ -767,12 +701,12 @@
   }
 
   .game-search-input::placeholder {
-    color: rgba(255, 255, 255, 0.4);
+    color: color-mix(in srgb, var(--text) 40%, transparent);
   }
 
   .game-search-input:focus {
-    border-color: rgba(255, 255, 255, 0.5);
-    background: rgba(255, 255, 255, 0.11);
+    border-color: color-mix(in srgb, var(--text) 50%, transparent);
+    background: color-mix(in srgb, var(--text) 11%, transparent);
   }
 
   .game-search-input:disabled {
@@ -797,7 +731,7 @@
     transform: translateY(-50%);
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.55);
+    color: color-mix(in srgb, var(--text) 55%, transparent);
     font-size: 1.2rem;
     line-height: 1;
     cursor: pointer;
@@ -807,7 +741,7 @@
   }
 
   .game-clear-btn:hover {
-    color: rgba(255, 255, 255, 0.9);
+    color: color-mix(in srgb, var(--text) 90%, transparent);
   }
 
   .game-dropdown {
@@ -815,8 +749,8 @@
     top: calc(100% + 4px);
     left: 0;
     right: 0;
-    background: #1e1e2e;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: var(--surface);
+    border: 1px solid color-mix(in srgb, var(--text) 18%, transparent);
     border-radius: 0.5rem;
     max-height: 260px;
     overflow-y: auto;
@@ -824,7 +758,7 @@
     list-style: none;
     margin: 0;
     padding: 0.25rem 0;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 8px 24px rgba(61, 43, 31, 0.18);
   }
 
   .game-dropdown li {
@@ -839,7 +773,7 @@
     background: none;
     border: none;
     padding: 0.55rem 0.9rem;
-    color: rgba(255, 255, 255, 0.8);
+    color: color-mix(in srgb, var(--text) 80%, transparent);
     font-size: 0.92rem;
     font-family: inherit;
     cursor: pointer;
@@ -850,8 +784,8 @@
 
   .game-dropdown-item:hover,
   .game-dropdown-item.selected {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
+    background: color-mix(in srgb, var(--text) 10%, transparent);
+    color: var(--text);
   }
 
   .game-dropdown-item.selected {
@@ -860,7 +794,7 @@
 
   .game-dropdown-empty {
     padding: 0.6rem 0.9rem;
-    color: rgba(255, 255, 255, 0.4);
+    color: color-mix(in srgb, var(--text) 40%, transparent);
     font-size: 0.88rem;
     font-style: italic;
   }

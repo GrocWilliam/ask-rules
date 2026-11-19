@@ -15,7 +15,7 @@
   </header>
 
   <section class="about-section">
-    <h2>À quoi ça sert ?</h2>
+    <h2><span aria-hidden="true">🎲</span> À quoi ça sert ?</h2>
     <p>
       En pleine partie, une question de règle bloque la table : « Peut-on faire ça ? », « Que fait
       cette tuile ? ». Chercher dans le livret prend du temps et casse le rythme.
@@ -27,7 +27,7 @@
   </section>
 
   <section class="about-section">
-    <h2>Quand l'utiliser ?</h2>
+    <h2><span aria-hidden="true">🧩</span> Quand l'utiliser ?</h2>
     <ul>
       <li><strong>Trancher un désaccord</strong> entre joueurs sur une règle précise.</li>
       <li><strong>Comprendre un élément de jeu</strong> : une carte, une tuile, une action.</li>
@@ -39,7 +39,7 @@
   </section>
 
   <section class="about-section">
-    <h2>Comment l'utiliser ?</h2>
+    <h2><span aria-hidden="true">♟️</span> Comment l'utiliser ?</h2>
     <ol>
       <li>
         <strong>Choisissez le jeu</strong> dans la liste, ou nommez-le dans votre question : il est reconnu
@@ -61,7 +61,7 @@
   </section>
 
   <section class="about-section">
-    <h2>Bon à savoir</h2>
+    <h2><span aria-hidden="true">💡</span> Bon à savoir</h2>
     <ul>
       <li>
         Les réponses viennent <strong>uniquement du livret</strong> du jeu. Si la règle n'y est pas, Reglomatic
@@ -85,11 +85,32 @@
 </main>
 
 <style>
+  /* Chaque carte prend la couleur d'un pion */
   .about-section {
     background: var(--surface);
     border: 1px solid var(--border);
+    border-top: 6px solid var(--pawn);
     border-radius: var(--radius);
+    box-shadow: var(--shadow);
     padding: 1.5rem;
+  }
+
+  .about-section:nth-of-type(1) {
+    --pawn: var(--accent);
+  }
+  .about-section:nth-of-type(2) {
+    --pawn: var(--yellow);
+  }
+  .about-section:nth-of-type(3) {
+    --pawn: var(--green);
+  }
+  .about-section:nth-of-type(4) {
+    --pawn: var(--blue);
+  }
+
+  .about-section li::marker {
+    color: var(--pawn);
+    font-weight: 800;
   }
 
   .about-section h2 {
@@ -117,5 +138,9 @@
   .about-cta {
     align-self: center;
     text-decoration: none;
+    font-size: 1.1rem;
+    padding: 0.85rem 2rem;
+    border-radius: 999px;
+    box-shadow: 0 4px 0 var(--accent-hover);
   }
 </style>

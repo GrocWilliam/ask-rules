@@ -151,7 +151,7 @@
 
   @keyframes pulse {
     50% {
-      box-shadow: 0 0 0 6px rgba(248, 113, 113, 0.25);
+      box-shadow: 0 0 0 6px color-mix(in srgb, var(--red) 25%, transparent);
     }
   }
 </style>
