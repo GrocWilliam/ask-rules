@@ -69,7 +69,7 @@ type SectionRepository interface {
 	// Retourne les sections correspondantes triées par pertinence.
 	FullTextSearch(ctx context.Context, gameID string, query string, limit int) ([]*ScoredSection, error)
 
-	// Neighbors retourne la section et ses voisines immédiates (chunk_index ± 1)
+	// Neighbors retourne la section et ses voisines (chunk_index ± 2)
 	// du même fichier et du même chapitre, dans l'ordre du livret.
 	Neighbors(ctx context.Context, sec *ScoredSection) ([]*ScoredSection, error)
 }
@@ -191,14 +191,15 @@ func (r *sectionRepository) FullTextSearch(ctx context.Context, gameID string, q
 	return scanScored(r.pool.Query(ctx, sqlQuery, query, gameID, limit))
 }
 
-// Neighbors retourne la section et ses voisines (chunk_index ± 1) du même
-// fichier et du même chapitre, dans l'ordre du livret.
+// Neighbors retourne la section et ses voisines (chunk_index ± 2) du même
+// fichier et du même chapitre, dans l'ordre du livret. ± 2 : une règle peut
+// s'étaler sur 3 chunks après son annonce (effets d'une tuile Navire, Châteaux de Bourgogne p. 5).
 func (r *sectionRepository) Neighbors(ctx context.Context, sec *ScoredSection) ([]*ScoredSection, error) {
 	query := `
 		SELECT ` + scoredColumns + `, 0::float8 AS score
 		FROM sections
 		WHERE game_id = $1 AND fichier_source = $2 AND hierarchy_path = $3
-		  AND chunk_index BETWEEN $4::int - 1 AND $4::int + 1
+		  AND chunk_index BETWEEN $4::int - 2 AND $4::int + 2
 		ORDER BY chunk_index
 	`
 

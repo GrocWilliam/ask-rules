@@ -92,7 +92,7 @@ type chapterRepo struct {
 func (r chapterRepo) Neighbors(ctx context.Context, s *store.ScoredSection) ([]*store.ScoredSection, error) {
 	var out []*store.ScoredSection
 	for i := range r.chunks {
-		if d := r.chunks[i].ChunkIndex - s.ChunkIndex; d >= -1 && d <= 1 {
+		if d := r.chunks[i].ChunkIndex - s.ChunkIndex; d >= -2 && d <= 2 {
 			out = append(out, &r.chunks[i])
 		}
 	}
@@ -113,19 +113,19 @@ func TestExpandTop_MergesChapterNeighbors(t *testing.T) {
 	other := sec("other", 0)
 	other.Text = "Combat"
 
-	// c2 absorbe c1 et c3 ; c3, déjà utilisé, disparaît ; c5 est la 2e section
-	// étendue, avec c4 seulement ; other (3e) n'est pas étendue
+	// c2 absorbe c1 à c4 ; c3, déjà utilisé, disparaît ; c5 est la 2e section
+	// étendue, seule (c3, c4 déjà utilisés) ; other (3e) n'est pas étendue
 	got := expandTop(context.Background(), repo, []store.ScoredSection{chunk(2), chunk(3), chunk(5), other})
 	var texts []string
 	for _, s := range got {
 		texts = append(texts, s.Text)
 	}
-	want := []string{"Phase 1\n\nPhase 2\n\nPhase 3", "Phase 4\n\nPhase 5", "Combat"}
+	want := []string{"Phase 1\n\nPhase 2\n\nPhase 3\n\nPhase 4", "Phase 5", "Combat"}
 	if fmt.Sprint(texts) != fmt.Sprint(want) {
 		t.Fatalf("sections : %q, attendu %q", texts, want)
 	}
-	if *got[0].PageStart != 1 || *got[0].PageEnd != 3 {
-		t.Fatalf("pages de la 1re section : p.%d-%d, attendu p.1-3", *got[0].PageStart, *got[0].PageEnd)
+	if *got[0].PageStart != 1 || *got[0].PageEnd != 4 {
+		t.Fatalf("pages de la 1re section : p.%d-%d, attendu p.1-4", *got[0].PageStart, *got[0].PageEnd)
 	}
 
 	// Sans chapitre connu, pas d'extension

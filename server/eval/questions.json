@@ -11,6 +11,12 @@
       "files": [
         "anachrony/FRENCH_Anachrony.pdf"
       ]
+    },
+    {
+      "name": "Chateau de bourgogne",
+      "files": [
+        "chateau-de-bourgogne/1771957190344_26925_Les_chateaux_de_Bourgogne_00.pdf"
+      ]
     }
   ],
   "questions": [
@@ -365,6 +371,18 @@
       "game": "Anachrony",
       "question": "Que fait le dragon quand il se réveille ?",
       "expected": []
+    },
+    {
+      "game": "Chateau de bourgogne",
+      "question": "A quoi servent les tuiles bleu ?",
+      "expected": [
+        "les deux effets suivants",
+        "déplace son pion sur le pont"
+      ],
+      "answer": [
+        "marchandises",
+        "pont"
+      ]
     }
   ]
 }
